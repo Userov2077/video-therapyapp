@@ -51,7 +51,7 @@ files.forEach(f => {
 function saveData() { files.forEach(f => fs.writeFileSync(`${dataPath}${f}.json`, JSON.stringify(globalData[f], null, 2))); }
 const getUser = id => globalData.users.find(u => u.id === id);
 
-// ---- Регистрация и авторизация ----
+// ---- Регистрация и авторизация (без изменений) ----
 app.post('/api/register', (req, res) => {
     const { fullName, email, phone, password, role, specialization, experience, about } = req.body;
     if (globalData.users.find(u => u.email === email)) return res.json({ success: false, error: 'Email уже используется' });
@@ -404,32 +404,75 @@ app.get('/api/psychologists', (req, res) => {
     res.json({ success: true, psychologists: globalData.users.filter(u => u.role === 'psychologist').map(({ password, ...u }) => u) });
 });
 
-// ---- WebRTC комнаты ----
-const activeRooms = new Map();
+// ---- WebRTC комнаты с улучшенной очисткой и поддержкой переподключения ----
+const activeRooms = new Map(); // roomId -> { psychologist: socketId, client: socketId, users: Map }
+
 io.on('connection', (socket) => {
+    console.log(`🔌 Новое подключение: ${socket.id}`);
+    
     socket.on('register_user', (userId) => {
         socket.userId = userId;
-        if (userId) socket.join(userId);
+        if (userId) {
+            socket.join(userId);
+            console.log(`👤 Пользователь ${userId} зарегистрирован, сокет ${socket.id}`);
+        }
     });
 
     socket.on('join-call-room', (roomId, userId, userType) => {
         try {
-            if (!activeRooms.has(roomId)) activeRooms.set(roomId, { psychologist: null, client: null, users: new Map() });
-            const room = activeRooms.get(roomId);
-            room.users.set(socket.id, { userId, userType });
-            if (userType === 'psychologist') room.psychologist = socket.id;
-            else room.client = socket.id;
+            console.log(`📞 join-call-room: комната ${roomId}, пользователь ${userId} (${userType}), сокет ${socket.id}`);
+            
+            // Если комната уже существует, проверим, не заходит ли тот же пользователь повторно
+            if (activeRooms.has(roomId)) {
+                const room = activeRooms.get(roomId);
+                // Если это психолог и в комнате уже есть психолог, удалим старого
+                if (userType === 'psychologist' && room.psychologist && room.psychologist !== socket.id) {
+                    const oldSocketId = room.psychologist;
+                    console.log(`🔄 Замена психолога в комнате ${roomId}: ${oldSocketId} -> ${socket.id}`);
+                    io.to(oldSocketId).emit('partner-disconnected');
+                    // Удаляем старого из комнаты
+                    const oldSocket = io.sockets.sockets.get(oldSocketId);
+                    if (oldSocket) oldSocket.leave(roomId);
+                    room.psychologist = socket.id;
+                    room.users.delete(oldSocketId);
+                } else if (userType === 'client' && room.client && room.client !== socket.id) {
+                    const oldSocketId = room.client;
+                    console.log(`🔄 Замена клиента в комнате ${roomId}: ${oldSocketId} -> ${socket.id}`);
+                    io.to(oldSocketId).emit('partner-disconnected');
+                    const oldSocket = io.sockets.sockets.get(oldSocketId);
+                    if (oldSocket) oldSocket.leave(roomId);
+                    room.client = socket.id;
+                    room.users.delete(oldSocketId);
+                }
+                room.users.set(socket.id, { userId, userType });
+                if (userType === 'psychologist') room.psychologist = socket.id;
+                else room.client = socket.id;
+            } else {
+                // Новая комната
+                activeRooms.set(roomId, { psychologist: null, client: null, users: new Map() });
+                const room = activeRooms.get(roomId);
+                room.users.set(socket.id, { userId, userType });
+                if (userType === 'psychologist') room.psychologist = socket.id;
+                else room.client = socket.id;
+            }
+            
             socket.join(roomId);
             socket.roomId = roomId;
             socket.userId = userId;
             socket.userType = userType;
+            
+            const room = activeRooms.get(roomId);
+            console.log(`📊 Текущее состояние комнаты ${roomId}: психолог=${room.psychologist}, клиент=${room.client}, users=${room.users.size}`);
+            
+            // Если оба участника в комнате, уведомляем их
             if (room.psychologist && room.client) {
+                console.log(`🎉 Оба участника в комнате ${roomId}, уведомляем о готовности`);
                 io.to(room.psychologist).emit('call-ready', { partnerId: room.client });
                 io.to(room.client).emit('call-ready', { partnerId: room.psychologist });
             }
             socket.emit('room-joined');
         } catch (err) {
-            console.error('join-call-room error:', err);
+            console.error('Ошибка в join-call-room:', err);
         }
     });
     
@@ -445,11 +488,11 @@ io.on('connection', (socket) => {
                         time: new Date().toISOString()
                     });
                 }
-                // Сохраняем сообщение в общий чат (глобальный массив messages)
+                // Сохраняем сообщение в общий чат (опционально)
                 const newMsg = { 
                     id: Date.now().toString(), 
                     from: socket.userId, 
-                    to: socket.userType === 'psychologist' ? (room.client ? globalData.users.find(u => u.id === socket.userId)?.role === 'psychologist' ? 'client' : 'psychologist' : 'unknown') : (room.psychologist ? 'psychologist' : 'unknown'),
+                    to: socket.userType === 'psychologist' ? (room.client ? 'client' : 'unknown') : (room.psychologist ? 'psychologist' : 'unknown'),
                     text: msgData.text, 
                     createdAt: new Date().toISOString(), 
                     isRead: false 
@@ -458,24 +501,65 @@ io.on('connection', (socket) => {
                 saveData();
             }
         } catch (err) {
-            console.error('call-message error:', err);
+            console.error('Ошибка в call-message:', err);
         }
     });
     
-    socket.on('offer', (data) => socket.to(data.target).emit('offer', { sdp: data.sdp, from: socket.id }));
-    socket.on('answer', (data) => socket.to(data.target).emit('answer', { sdp: data.sdp, from: socket.id }));
-    socket.on('ice-candidate', (data) => socket.to(data.target).emit('ice-candidate', { candidate: data.candidate, from: socket.id }));
-    socket.on('end-call', () => { 
-        if (socket.roomId) { 
-            socket.to(socket.roomId).emit('call-ended'); 
-            activeRooms.delete(socket.roomId); 
-        } 
+    socket.on('offer', (data) => {
+        console.log(`📤 Offer от ${socket.id} к ${data.target}`);
+        socket.to(data.target).emit('offer', { sdp: data.sdp, from: socket.id });
     });
-    socket.on('disconnect', () => { 
-        if (socket.roomId) { 
-            socket.to(socket.roomId).emit('partner-disconnected'); 
-            activeRooms.delete(socket.roomId); 
-        } 
+    
+    socket.on('answer', (data) => {
+        console.log(`📤 Answer от ${socket.id} к ${data.target}`);
+        socket.to(data.target).emit('answer', { sdp: data.sdp, from: socket.id });
+    });
+    
+    socket.on('ice-candidate', (data) => {
+        socket.to(data.target).emit('ice-candidate', { candidate: data.candidate, from: socket.id });
+    });
+    
+    socket.on('end-call', () => {
+        if (socket.roomId) {
+            console.log(`📞 Завершение звонка в комнате ${socket.roomId} от ${socket.id}`);
+            socket.to(socket.roomId).emit('call-ended');
+            // Не удаляем комнату сразу, чтобы другой участник мог переподключиться
+            // Удалим только через 5 секунд, если никто не переподключился
+            setTimeout(() => {
+                const room = activeRooms.get(socket.roomId);
+                if (room && (!room.psychologist || !room.client)) {
+                    console.log(`🗑️ Удаляем пустую комнату ${socket.roomId}`);
+                    activeRooms.delete(socket.roomId);
+                }
+            }, 5000);
+            socket.leave(socket.roomId);
+            delete socket.roomId;
+        }
+    });
+    
+    socket.on('disconnect', () => {
+        console.log(`❌ Отключение сокета ${socket.id}`);
+        if (socket.roomId) {
+            socket.to(socket.roomId).emit('partner-disconnected');
+            const room = activeRooms.get(socket.roomId);
+            if (room) {
+                room.users.delete(socket.id);
+                if (socket.userType === 'psychologist') room.psychologist = null;
+                else room.client = null;
+                console.log(`📊 После отключения в комнате ${socket.roomId}: психолог=${room.psychologist}, клиент=${room.client}, users=${room.users.size}`);
+                // Если комната пуста, удаляем через 10 секунд
+                if (room.users.size === 0) {
+                    setTimeout(() => {
+                        const currentRoom = activeRooms.get(socket.roomId);
+                        if (currentRoom && currentRoom.users.size === 0) {
+                            console.log(`🗑️ Удаляем пустую комнату ${socket.roomId}`);
+                            activeRooms.delete(socket.roomId);
+                        }
+                    }, 10000);
+                }
+            }
+            socket.leave(socket.roomId);
+        }
     });
 });
 

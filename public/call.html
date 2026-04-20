@@ -34,6 +34,8 @@
         .control-btn:hover { transform: scale(1.1); background: rgba(139,202,139,0.3); }
         .end-call { background: rgba(220,38,38,0.8); }
         .end-call:hover { background: #dc2626; }
+        .reconnect-btn { background: rgba(245,158,11,0.8); }
+        .reconnect-btn:hover { background: #f59e0b; }
         .control-btn.muted { background: #f59e0b; }
         .recording-active { background: #dc2626 !important; animation: pulse 1s infinite; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
@@ -41,6 +43,7 @@
         .recording-indicator.show { display: flex; }
         .call-info { text-align: center; padding: 10px 20px; background: rgba(30,35,32,0.6); backdrop-filter: blur(10px); border-radius: 40px; display: inline-block; width: auto; margin: 0 auto; font-size: 14px; border: 1px solid rgba(139,202,139,0.2); }
         #connection-status { position: fixed; bottom: 20px; right: 20px; background: rgba(0,0,0,0.7); backdrop-filter: blur(10px); padding: 8px 16px; border-radius: 30px; font-size: 12px; font-family: monospace; cursor: pointer; z-index: 1000; border: 1px solid rgba(139,202,139,0.3); }
+        .restart-btn { background: #f59e0b; margin-left: 8px; }
         
         /* Мобильная адаптация */
         @media (max-width: 768px) {
@@ -92,6 +95,7 @@
                     <button id="toggleMic" class="control-btn" title="Микрофон"><i class="fas fa-microphone"></i></button>
                     <button id="toggleCam" class="control-btn" title="Камера"><i class="fas fa-video"></i></button>
                     <button id="recordBtn" class="control-btn" title="Запись звонка"><i class="fas fa-circle"></i></button>
+                    <button id="reconnectBtn" class="control-btn reconnect-btn" title="Переподключиться"><i class="fas fa-sync-alt"></i></button>
                     <button id="endCall" class="control-btn end-call" title="Завершить"><i class="fas fa-phone-slash"></i></button>
                 </div>
             </div>
@@ -117,11 +121,13 @@
             let peerConnection = null;
             let currentRoomId = null;
             let userRole = null;
-            let partnerSocketId = null; // socket.id партнёра, а не userId
+            let partnerSocketId = null;
             let currentUserId = null;
             let mediaRecorder = null;
             let recordedChunks = [];
             let isRecording = false;
+            let reconnectAttempts = 0;
+            const MAX_RECONNECT_ATTEMPTS = 3;
             
             const urlParams = new URLSearchParams(window.location.search);
             currentRoomId = urlParams.get('room');
@@ -136,6 +142,7 @@
             const toggleMicBtn = document.getElementById('toggleMic');
             const toggleCamBtn = document.getElementById('toggleCam');
             const recordBtn = document.getElementById('recordBtn');
+            const reconnectBtn = document.getElementById('reconnectBtn');
             const endCallBtn = document.getElementById('endCall');
             const statusText = document.getElementById('statusText');
             const chatMessages = document.getElementById('chatMessages');
@@ -176,18 +183,26 @@
                 });
             }
             
-            async function initWebRTC() {
-                if (peerConnection) return;
-                updateStatus('Настройка соединения...');
-                const config = {
-                    iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun2.l.google.com:19302' },
-                        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-                        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
-                    ]
-                };
+            async function getIceServers() {
+                // Надёжные TURN-серверы от Metered.ca (бесплатно до 50GB/мес)
+                return [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' },
+                    { urls: 'stun:stun4.l.google.com:19302' },
+                    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+                    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+                    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+                ];
+            }
+            
+            async function createPeerConnection() {
+                if (peerConnection) {
+                    peerConnection.close();
+                    peerConnection = null;
+                }
+                const config = { iceServers: await getIceServers() };
                 peerConnection = new RTCPeerConnection(config);
                 localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
                 peerConnection.ontrack = (event) => {
@@ -202,13 +217,47 @@
                 };
                 peerConnection.oniceconnectionstatechange = () => {
                     const state = peerConnection.iceConnectionState;
-                    if (state === 'connected') updateStatus('✅ Соединение установлено!');
-                    if (state === 'failed') updateStatus('❌ Соединение не удалось', true);
+                    if (state === 'connected') {
+                        updateStatus('✅ Соединение установлено!');
+                        reconnectAttempts = 0;
+                    }
+                    if (state === 'failed') {
+                        updateStatus('❌ ICE соединение не удалось', true);
+                        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                            updateStatus('Попытка переподключения...');
+                            setTimeout(() => reconnect(), 2000);
+                        } else {
+                            updateStatus('Не удалось подключиться. Нажмите кнопку переподключения.', true);
+                        }
+                    }
                 };
-                if (userRole === 'psychologist') {
+                return peerConnection;
+            }
+            
+            async function initWebRTC(createOffer = true) {
+                if (!localStream) return;
+                await createPeerConnection();
+                if (createOffer && userRole === 'psychologist' && partnerSocketId) {
                     const offer = await peerConnection.createOffer();
                     await peerConnection.setLocalDescription(offer);
                     socket.emit('offer', { target: partnerSocketId, sdp: offer });
+                }
+            }
+            
+            async function reconnect() {
+                if (isRecording) stopRecording();
+                updateStatus('Переподключение...');
+                reconnectAttempts++;
+                if (peerConnection) {
+                    peerConnection.close();
+                    peerConnection = null;
+                }
+                partnerSocketId = null;
+                waitingMessage.style.display = 'flex';
+                remoteVideo.srcObject = null;
+                // Заново запрашиваем партнёра через сокет
+                if (socket) {
+                    socket.emit('join-call-room', currentRoomId, currentUserId, userRole);
                 }
             }
             
@@ -224,21 +273,23 @@
                         socket.emit('join-call-room', currentRoomId, currentUserId, userRole);
                     });
                     socket.on('room-joined', () => updateStatus('Ожидание собеседника...'));
-                    socket.on('call-ready', (data) => {
+                    socket.on('call-ready', async (data) => {
                         updateStatus('Собеседник найден, установка соединения...');
                         partnerSocketId = data.partnerId;
-                        initWebRTC();
+                        await initWebRTC(true);
                     });
                     socket.on('offer', async (data) => {
                         partnerSocketId = data.from;
-                        if (!peerConnection) await initWebRTC();
+                        if (!peerConnection) await initWebRTC(false);
                         await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
                         const answer = await peerConnection.createAnswer();
                         await peerConnection.setLocalDescription(answer);
                         socket.emit('answer', { target: partnerSocketId, sdp: answer });
                     });
                     socket.on('answer', async (data) => {
-                        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                        if (peerConnection) {
+                            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                        }
                     });
                     socket.on('ice-candidate', async (data) => {
                         if (peerConnection) {
@@ -267,6 +318,7 @@
                         chatInput.value = '';
                     };
                     chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChatBtn.click(); };
+                    reconnectBtn.onclick = () => reconnect();
                 } catch (error) {
                     updateStatus('Нет доступа к камере', true);
                     alert('Не удалось получить доступ к камере');
