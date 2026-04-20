@@ -93,7 +93,6 @@ app.get('/api/user/:id', (req, res) => {
     else res.json({ success: false, error: 'Пользователь не найден' });
 });
 
-// API Обновить профиль (принимает как JSON, так и FormData)
 app.put('/api/user/profile', upload.single('avatar'), (req, res) => {
     const { userId, fullName, phone, about, specialization, experience, price, topics, avatar } = req.body;
     const user = getUser(userId);
@@ -196,11 +195,18 @@ app.delete('/api/achievement/:userId/:achievementId', (req, res) => {
     res.json({ success: true });
 });
 
+// ----- ПОСТЫ -----
 app.get('/api/posts', (req, res) => {
     const posts = [...data.posts].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
     const enriched = posts.map(post => {
         const author = getUser(post.authorId);
-        return { ...post, author: { id: author.id, fullName: author.fullName, avatar: author.avatar }, likes: data.likes.filter(l => l.postId === post.id).length, comments: data.comments.filter(c => c.postId === post.id).map(c => ({ ...c, author: getUser(c.authorId) })) };
+        return { 
+            ...post, 
+            author: { id: author.id, fullName: author.fullName, avatar: author.avatar }, 
+            likesCount: data.likes.filter(l => l.postId === post.id).length,
+            commentsCount: data.comments.filter(c => c.postId === post.id).length,
+            comments: data.comments.filter(c => c.postId === post.id).map(c => ({ ...c, author: getUser(c.authorId) }))
+        };
     });
     res.json({ success: true, posts: enriched });
 });
@@ -209,8 +215,87 @@ app.post('/api/posts', upload.single('image'), (req, res) => {
     const { authorId, text } = req.body;
     const author = getUser(authorId);
     if (!author || author.role !== 'psychologist') return res.json({ success: false, error: 'Только психологи могут создавать посты' });
-    data.posts.push({ id: Date.now().toString(), authorId, text, image: req.file ? `/uploads/images/${req.file.filename}` : null, createdAt: new Date().toISOString(), likesCount: 0, commentsCount: 0 });
+    const newPost = { 
+        id: Date.now().toString(), 
+        authorId, 
+        text, 
+        image: req.file ? `/uploads/images/${req.file.filename}` : null, 
+        createdAt: new Date().toISOString()
+    };
+    data.posts.push(newPost);
     saveData();
+    // Отправляем событие всем подключённым клиентам
+    io.emit('post_created', newPost);
+    res.json({ success: true });
+});
+
+app.put('/api/posts/:id', upload.single('image'), (req, res) => {
+    const postId = req.params.id;
+    const { authorId, text } = req.body;
+    const post = data.posts.find(p => p.id === postId);
+    if (!post) return res.json({ success: false, error: 'Пост не найден' });
+    if (post.authorId !== authorId) return res.json({ success: false, error: 'Нет прав' });
+    post.text = text;
+    if (req.file) post.image = `/uploads/images/${req.file.filename}`;
+    saveData();
+    io.emit('post_updated', { id: postId, text, image: post.image });
+    res.json({ success: true });
+});
+
+app.delete('/api/posts/:id', (req, res) => {
+    const postId = req.params.id;
+    const { authorId } = req.body;
+    const post = data.posts.find(p => p.id === postId);
+    if (!post) return res.json({ success: false, error: 'Пост не найден' });
+    if (post.authorId !== authorId) return res.json({ success: false, error: 'Нет прав' });
+    data.posts = data.posts.filter(p => p.id !== postId);
+    data.likes = data.likes.filter(l => l.postId !== postId);
+    data.comments = data.comments.filter(c => c.postId !== postId);
+    saveData();
+    io.emit('post_deleted', postId);
+    res.json({ success: true });
+});
+
+// ----- КОММЕНТАРИИ -----
+app.post('/api/posts/:id/comment', (req, res) => {
+    const { userId, text } = req.body;
+    const postId = req.params.id;
+    const newComment = { 
+        id: Date.now().toString(), 
+        postId, 
+        authorId: userId, 
+        text, 
+        createdAt: new Date().toISOString() 
+    };
+    data.comments.push(newComment);
+    saveData();
+    const author = getUser(userId);
+    const commentWithAuthor = { ...newComment, author: { id: author.id, fullName: author.fullName, avatar: author.avatar } };
+    io.emit('comment_created', { postId, comment: commentWithAuthor });
+    res.json({ success: true });
+});
+
+app.put('/api/comments/:id', (req, res) => {
+    const commentId = req.params.id;
+    const { userId, text } = req.body;
+    const comment = data.comments.find(c => c.id === commentId);
+    if (!comment) return res.json({ success: false, error: 'Комментарий не найден' });
+    if (comment.authorId !== userId) return res.json({ success: false, error: 'Нет прав' });
+    comment.text = text;
+    saveData();
+    io.emit('comment_updated', { commentId, text, postId: comment.postId });
+    res.json({ success: true });
+});
+
+app.delete('/api/comments/:id', (req, res) => {
+    const commentId = req.params.id;
+    const { userId } = req.body;
+    const comment = data.comments.find(c => c.id === commentId);
+    if (!comment) return res.json({ success: false, error: 'Комментарий не найден' });
+    if (comment.authorId !== userId) return res.json({ success: false, error: 'Нет прав' });
+    data.comments = data.comments.filter(c => c.id !== commentId);
+    saveData();
+    io.emit('comment_deleted', { commentId, postId: comment.postId });
     res.json({ success: true });
 });
 
@@ -223,26 +308,19 @@ app.post('/api/posts/:id/like', (req, res) => {
         const post = data.posts.find(p => p.id === postId);
         if (post) post.likesCount--;
         saveData();
-        res.json({ success: true, liked: false, likesCount: post.likesCount });
+        io.emit('post_liked', { postId, likesCount: data.likes.filter(l => l.postId === postId).length, userId, liked: false });
+        res.json({ success: true, liked: false, likesCount: data.likes.filter(l => l.postId === postId).length });
     } else {
         data.likes.push({ id: Date.now().toString(), postId, userId, createdAt: new Date().toISOString() });
         const post = data.posts.find(p => p.id === postId);
         if (post) post.likesCount++;
         saveData();
-        res.json({ success: true, liked: true, likesCount: post.likesCount });
+        io.emit('post_liked', { postId, likesCount: data.likes.filter(l => l.postId === postId).length, userId, liked: true });
+        res.json({ success: true, liked: true, likesCount: data.likes.filter(l => l.postId === postId).length });
     }
 });
 
-app.post('/api/posts/:id/comment', (req, res) => {
-    const { userId, text } = req.body;
-    const postId = req.params.id;
-    data.comments.push({ id: Date.now().toString(), postId, authorId: userId, text, createdAt: new Date().toISOString() });
-    const post = data.posts.find(p => p.id === postId);
-    if (post) post.commentsCount++;
-    saveData();
-    res.json({ success: true });
-});
-
+// ----- ЗАПИСИ НА ПРИЁМ -----
 app.post('/api/appointment', (req, res) => {
     const { clientId, psychologistId, date, time } = req.body;
     const client = getUser(clientId);
@@ -260,8 +338,12 @@ app.post('/api/appointment', (req, res) => {
     data.appointments.push(appointment);
     client.appointments.push(appointment);
     psychologist.clients.push({ clientId, clientName: client.fullName, appointmentId: appointment.id, date, time, status: 'pending', roomId });
-    psychologist.notifications.unshift({ id: Date.now().toString(), type: 'new_appointment', title: 'Новая заявка', message: `${client.fullName} хочет записаться на ${date} в ${time}`, appointmentId: appointment.id, roomId, read: false, createdAt: new Date().toISOString() });
+    const notification = { id: Date.now().toString(), type: 'new_appointment', title: 'Новая заявка', message: `${client.fullName} хочет записаться на ${date} в ${time}`, appointmentId: appointment.id, roomId, read: false, createdAt: new Date().toISOString() };
+    psychologist.notifications.unshift(notification);
     saveData();
+    // Отправляем уведомление психологу в реальном времени
+    io.to(psychologistId).emit('notification', notification);
+    io.to(psychologistId).emit('appointment_created', appointment);
     res.json({ success: true });
 });
 
@@ -274,11 +356,16 @@ app.post('/api/appointment/confirm', (req, res) => {
     const client = getUser(clientId);
     if (psychologist) { const c = psychologist.clients.find(c => c.appointmentId === appointmentId); if (c) c.status = 'confirmed'; }
     if (client) { const a = client.appointments.find(a => a.id === appointmentId); if (a) a.status = 'confirmed'; }
-    client.notifications.unshift({ id: Date.now().toString(), type: 'appointment_confirmed', title: 'Запись подтверждена!', message: `${psychologist.fullName} подтвердил запись на ${appointment.date} в ${appointment.time}`, appointmentId, roomId: appointment.roomId, read: false, createdAt: new Date().toISOString() });
+    const notification = { id: Date.now().toString(), type: 'appointment_confirmed', title: 'Запись подтверждена!', message: `${psychologist.fullName} подтвердил запись на ${appointment.date} в ${appointment.time}`, appointmentId, roomId: appointment.roomId, read: false, createdAt: new Date().toISOString() };
+    client.notifications.unshift(notification);
     saveData();
+    io.to(clientId).emit('notification', notification);
+    io.to(clientId).emit('appointment_updated', appointment);
+    io.to(psychologistId).emit('appointment_updated', appointment);
     res.json({ success: true });
 });
 
+// ----- ЧАТ -----
 app.get('/api/messages/:userId', (req, res) => {
     const userId = req.params.userId;
     const user = getUser(userId);
@@ -309,8 +396,15 @@ app.get('/api/psychologists', (req, res) => {
     res.json({ success: true, psychologists: data.users.filter(u => u.role === 'psychologist').map(({ password, ...u }) => u) });
 });
 
+// ----- WEBSOCKET комнаты -----
 const activeRooms = new Map();
 io.on('connection', (socket) => {
+    // Присоединяем пользователя к его личной комнате для уведомлений
+    socket.on('register_user', (userId) => {
+        socket.userId = userId;
+        if (userId) socket.join(userId);
+    });
+
     socket.on('join-call-room', (roomId, userId, userType) => {
         if (!activeRooms.has(roomId)) activeRooms.set(roomId, { psychologist: null, client: null, users: new Map() });
         const room = activeRooms.get(roomId);
@@ -328,7 +422,6 @@ io.on('connection', (socket) => {
         socket.emit('room-joined');
     });
     
-    // Чат внутри звонка
     socket.on('call-message', (data) => {
         const room = activeRooms.get(socket.roomId);
         if (room) {
@@ -340,7 +433,6 @@ io.on('connection', (socket) => {
                     time: new Date().toISOString()
                 });
             }
-            // Сохраняем в общий чат
             const newMsg = { 
                 id: Date.now().toString(), 
                 from: socket.userId, 
