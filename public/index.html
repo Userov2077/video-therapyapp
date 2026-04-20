@@ -212,7 +212,7 @@
             .calendar-day { font-size: 11px; }
             .btn-login, .btn-register-nav { padding: 6px 14px; font-size: 12px; }
             
-            /* Чат на мобильных */
+            /* Чат на мобильных - вертикальная компоновка с двумя экранами */
             .chat-container { flex-direction: column; gap: 12px; }
             .chat-users { width: 100%; max-height: 180px; overflow-y: auto; margin-bottom: 0; border-radius: 18px; }
             .chat-users h4 { font-size: 13px; margin-bottom: 8px; }
@@ -1191,6 +1191,9 @@
         }
 
         // -------------------- ЧАТ (полная версия) --------------------
+        // Продолжение во второй части...
+
+                // -------------------- ЧАТ (полная версия) --------------------
         async function initChat(container) {
             const data = await fetchJSON(`/api/messages/${currentUser.id}`);
             const users = data.users || [];
@@ -1204,15 +1207,12 @@
             });
             
             const totalUnread = Object.values(unreadMap).reduce((a, b) => a + b, 0);
-            
-            // Определяем мобильное устройство
             const isMobile = window.innerWidth <= 768;
             
             if (isMobile) {
-                // Мобильная версия: два экрана
+                // Мобильная версия: два экрана (список контактов и окно чата)
                 container.innerHTML = `
                     <div class="mobile-chat-wrapper">
-                        <!-- Экран списка контактов -->
                         <div id="contactsView" class="contacts-view">
                             <div class="chat-users-header">
                                 <h4>💬 Контакты <span id="totalUnreadBadge" style="background:#8bca8b; color:#1a3c2c; border-radius:10px; padding:2px 6px; font-size:10px; margin-left:8px;">${totalUnread > 0 ? totalUnread : ''}</span></h4>
@@ -1223,15 +1223,12 @@
                                         <img class="chat-user-avatar" src="${u.avatar}">
                                         <div class="chat-user-name">${escapeHtml(u.fullName)}</div>
                                         <div class="chat-user-role">${u.role === 'psychologist' ? 'Психолог' : 'Клиент'}</div>
-                                        ${unreadMap[u.id] ? `<div class="unread-badge">${unreadMap[u.id]}</div>` : ''}
-                                        ${unreadMap[u.id] ? `<div class="red-dot"></div>` : ''}
+                                        ${unreadMap[u.id] ? `<div class="unread-badge">${unreadMap[u.id]}</div><div class="red-dot"></div>` : ''}
                                     </div>
                                 `).join('')}
                                 ${users.length === 0 ? '<div style="text-align:center; opacity:0.5; padding:20px;">Нет доступных контактов</div>' : ''}
                             </div>
                         </div>
-                        
-                        <!-- Экран чата (изначально скрыт) -->
                         <div id="chatView" class="chat-view" style="display: none;">
                             <div class="chat-header">
                                 <button id="backToContactsBtn" class="btn-secondary" style="padding: 6px 12px; font-size: 12px;"><i class="fas fa-arrow-left"></i> Назад</button>
@@ -1248,65 +1245,25 @@
                                         <input type="file" id="imageInput" accept="image/*" style="display:none">
                                     </div>
                                     <input id="msgInput" placeholder="Сообщение..." disabled>
-                                    <button class="btn-primary" id="sendMsgBtn" disabled onclick="sendMessage()">Отправить</button>
+                                    <button class="btn-primary" id="sendMsgBtn" disabled onclick="sendMessageMobile()">Отправить</button>
                                 </div>
                             </div>
                         </div>
                     </div>
                 `;
                 
-                // Элементы управления
                 const contactsView = document.getElementById('contactsView');
                 const chatView = document.getElementById('chatView');
                 const backBtn = document.getElementById('backToContactsBtn');
                 const chatPartnerNameSpan = document.getElementById('chatPartnerName');
                 
-                // Функция показа чата с контактом
-                async function openChatWith(userId, userName) {
-                    chatPartner = { id: userId, name: userName };
-                    chatPartnerNameSpan.textContent = userName;
-                    
-                    // Отметить сообщения как прочитанные
-                    await fetch('/api/messages/read', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ userId: currentUser.id, fromUserId: userId })
-                    });
-                    
-                    // Убрать бейджик у контакта в списке
-                    const userDiv = document.querySelector(`.chat-user[data-id="${userId}"]`);
-                    if (userDiv) {
-                        const badge = userDiv.querySelector('.unread-badge');
-                        if (badge) badge.remove();
-                        const redDot = userDiv.querySelector('.red-dot');
-                        if (redDot) redDot.remove();
-                    }
-                    // Обновить общий счётчик
-                    const refreshRes = await fetchJSON(`/api/messages/${currentUser.id}`);
-                    const newAllMessages = refreshRes.messages || [];
-                    const newUnreadMap = {};
-                    newAllMessages.forEach(m => {
-                        if (m.to === currentUser.id && !m.isRead) newUnreadMap[m.from] = (newUnreadMap[m.from] || 0) + 1;
-                    });
-                    const totalBadge = document.getElementById('totalUnreadBadge');
-                    const newTotalUnread = Object.values(newUnreadMap).reduce((a, b) => a + b, 0);
-                    if (totalBadge) totalBadge.textContent = newTotalUnread > 0 ? newTotalUnread : '';
-                    
-                    // Активировать поле ввода
-                    const msgInput = document.getElementById('msgInput');
-                    const sendBtn = document.getElementById('sendMsgBtn');
-                    if (msgInput) msgInput.disabled = false;
-                    if (sendBtn) sendBtn.disabled = false;
-                    
-                    // Загрузить сообщения
-                    await loadMessagesMobile();
-                    
-                    // Переключить видимость
-                    contactsView.style.display = 'none';
-                    chatView.style.display = 'flex';
-                }
+                let mediaRecorder = null;
+                let audioChunks = [];
+                let isRecording = false;
+                const attachImageBtn = document.getElementById('attachImageBtn');
+                const imageInput = document.getElementById('imageInput');
+                const voiceRecordBtn = document.getElementById('voiceRecordBtn');
                 
-                // Загрузка сообщений для мобильной версии
                 async function loadMessagesMobile() {
                     if (!chatPartner) return;
                     const res = await fetchJSON(`/api/messages/${currentUser.id}`);
@@ -1332,39 +1289,47 @@
                     }
                 }
                 
-                // Обработчики кликов по контактам
+                async function openChatWith(userId, userName) {
+                    chatPartner = { id: userId, name: userName };
+                    chatPartnerNameSpan.textContent = userName;
+                    await markMessagesAsRead(userId);
+                    const userDiv = document.querySelector(`.chat-user[data-id="${userId}"]`);
+                    if (userDiv) {
+                        const badge = userDiv.querySelector('.unread-badge');
+                        if (badge) badge.remove();
+                        const redDot = userDiv.querySelector('.red-dot');
+                        if (redDot) redDot.remove();
+                    }
+                    const refreshRes = await fetchJSON(`/api/messages/${currentUser.id}`);
+                    const newUnreadMap = {};
+                    refreshRes.messages.forEach(m => {
+                        if (m.to === currentUser.id && !m.isRead) newUnreadMap[m.from] = (newUnreadMap[m.from] || 0) + 1;
+                    });
+                    const totalBadge = document.getElementById('totalUnreadBadge');
+                    const newTotal = Object.values(newUnreadMap).reduce((a,b)=>a+b,0);
+                    if (totalBadge) totalBadge.textContent = newTotal > 0 ? newTotal : '';
+                    document.getElementById('msgInput').disabled = false;
+                    document.getElementById('sendMsgBtn').disabled = false;
+                    await loadMessagesMobile();
+                    contactsView.style.display = 'none';
+                    chatView.style.display = 'flex';
+                }
+                
                 document.querySelectorAll('.chat-user').forEach(el => {
-                    el.onclick = () => {
-                        const id = el.dataset.id;
-                        const name = el.dataset.name;
-                        openChatWith(id, name);
-                    };
+                    el.onclick = () => openChatWith(el.dataset.id, el.dataset.name);
                 });
                 
-                // Кнопка "Назад"
                 backBtn.onclick = () => {
                     contactsView.style.display = 'flex';
                     chatView.style.display = 'none';
-                    // Очистить поле ввода
-                    const msgInput = document.getElementById('msgInput');
-                    if (msgInput) msgInput.value = '';
+                    document.getElementById('msgInput').value = '';
                 };
-                
-                // Инициализация аудио/фото
-                let mediaRecorder = null;
-                let audioChunks = [];
-                let isRecording = false;
-                
-                const attachImageBtn = document.getElementById('attachImageBtn');
-                const imageInput = document.getElementById('imageInput');
-                const voiceRecordBtn = document.getElementById('voiceRecordBtn');
                 
                 if (attachImageBtn) {
                     attachImageBtn.onclick = () => imageInput.click();
                     imageInput.onchange = async () => {
                         const file = imageInput.files[0];
-                        if (!file) return;
-                        if (!file.type.startsWith('image/')) {
+                        if (!file || !file.type.startsWith('image/')) {
                             showToast('Можно загружать только изображения', true);
                             return;
                         }
@@ -1432,8 +1397,7 @@
                     };
                 }
                 
-                // Глобальная функция отправки сообщения (используется в onclick)
-                window.sendMessage = async () => {
+                window.sendMessageMobile = async () => {
                     const input = document.getElementById('msgInput');
                     if (!input.value.trim() || !chatPartner) return;
                     const res = await fetch('/api/messages', { 
@@ -1441,14 +1405,37 @@
                         headers: { 'Content-Type': 'application/json' }, 
                         body: JSON.stringify({ from: currentUser.id, to: chatPartner.id, text: input.value })
                     });
-                    const data = await res.json();
-                    if (data.success) {
+                    if (res.ok) {
                         input.value = '';
                         await loadMessagesMobile();
                     } else {
                         showToast('Ошибка отправки', true);
                     }
                 };
+                
+                // Подписка на новые сообщения через сокет (глобальный, но обновляем локально)
+                if (socket) {
+                    socket.off('new_message_mobile');
+                    socket.on('new_message', async (msg) => {
+                        if (msg.to === currentUser.id) {
+                            if (chatPartner && msg.from === chatPartner.id && chatView.style.display === 'flex') {
+                                await markMessagesAsRead(chatPartner.id);
+                                await loadMessagesMobile();
+                                const userDiv = document.querySelector(`.chat-user[data-id="${msg.from}"]`);
+                                if (userDiv) {
+                                    const badge = userDiv.querySelector('.unread-badge');
+                                    if (badge) badge.remove();
+                                    const redDot = userDiv.querySelector('.red-dot');
+                                    if (redDot) redDot.remove();
+                                }
+                            } else {
+                                // Обновляем список контактов (пересоздаём чат)
+                                initChat(container);
+                            }
+                            showToast(`Новое сообщение от ${msg.from}`, false, true);
+                        }
+                    });
+                }
                 
             } else {
                 // Десктопная версия
@@ -1462,8 +1449,7 @@
                                         <img class="chat-user-avatar" src="${u.avatar}">
                                         <div class="chat-user-name">${escapeHtml(u.fullName)}</div>
                                         <div class="chat-user-role">${u.role === 'psychologist' ? 'Психолог' : 'Клиент'}</div>
-                                        ${unreadMap[u.id] ? `<div class="unread-badge">${unreadMap[u.id]}</div>` : ''}
-                                        ${unreadMap[u.id] ? `<div class="red-dot"></div>` : ''}
+                                        ${unreadMap[u.id] ? `<div class="unread-badge">${unreadMap[u.id]}</div><div class="red-dot"></div>` : ''}
                                     </div>
                                 `).join('')}
                                 ${users.length === 0 ? '<div style="text-align:center; opacity:0.5; padding:20px;">Нет доступных контактов</div>' : ''}
@@ -1480,7 +1466,7 @@
                                     <input type="file" id="imageInput" accept="image/*" style="display:none">
                                 </div>
                                 <input id="msgInput" placeholder="Сообщение..." disabled>
-                                <button class="btn-primary" id="sendMsgBtn" disabled onclick="sendMessage()">Отправить</button>
+                                <button class="btn-primary" id="sendMsgBtn" disabled onclick="sendMessageDesktop()">Отправить</button>
                             </div>
                         </div>
                     </div>
@@ -1489,17 +1475,74 @@
                 let mediaRecorder = null;
                 let audioChunks = [];
                 let isRecording = false;
-                
                 const attachImageBtn = document.getElementById('attachImageBtn');
                 const imageInput = document.getElementById('imageInput');
                 const voiceRecordBtn = document.getElementById('voiceRecordBtn');
+                
+                async function loadMessagesDesktop() {
+                    if (!chatPartner) return;
+                    const res = await fetchJSON(`/api/messages/${currentUser.id}`);
+                    const all = (res.messages || []).filter(m => 
+                        (m.from === chatPartner.id && m.to === currentUser.id) || 
+                        (m.from === currentUser.id && m.to === chatPartner.id)
+                    );
+                    const listDiv = document.getElementById('messagesList');
+                    if (listDiv) {
+                        listDiv.innerHTML = all.map(m => {
+                            let content = '';
+                            if (m.text) content += `<div class="message-text">${escapeHtml(m.text)}</div>`;
+                            if (m.image) content += `<img class="chat-image" src="${m.image}" onclick="window.open('${m.image}','_blank')">`;
+                            if (m.voice) content += `<div class="voice-message"><audio controls src="${m.voice}"></audio></div>`;
+                            return `
+                                <div class="message ${m.from === currentUser.id ? 'outgoing' : 'incoming'}">
+                                    ${content}
+                                    <div class="message-time">${new Date(m.createdAt).toLocaleTimeString()}</div>
+                                </div>
+                            `;
+                        }).join('');
+                        listDiv.scrollTop = listDiv.scrollHeight;
+                    }
+                }
+                
+                async function markMessagesAsReadDesktop(contactId) {
+                    await fetch('/api/messages/read', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: currentUser.id, fromUserId: contactId })
+                    });
+                }
+                
+                document.querySelectorAll('.chat-user').forEach(el => {
+                    el.onclick = async () => {
+                        const id = el.dataset.id;
+                        const name = el.dataset.name;
+                        chatPartner = { id, name };
+                        await markMessagesAsReadDesktop(id);
+                        const badge = el.querySelector('.unread-badge');
+                        if (badge) badge.remove();
+                        const redDot = el.querySelector('.red-dot');
+                        if (redDot) redDot.remove();
+                        const refreshRes = await fetchJSON(`/api/messages/${currentUser.id}`);
+                        const newUnreadMap = {};
+                        refreshRes.messages.forEach(m => {
+                            if (m.to === currentUser.id && !m.isRead) newUnreadMap[m.from] = (newUnreadMap[m.from] || 0) + 1;
+                        });
+                        const totalBadge = document.getElementById('totalUnreadBadge');
+                        const newTotal = Object.values(newUnreadMap).reduce((a,b)=>a+b,0);
+                        if (totalBadge) totalBadge.textContent = newTotal > 0 ? newTotal : '';
+                        document.getElementById('msgInput').disabled = false;
+                        document.getElementById('sendMsgBtn').disabled = false;
+                        await loadMessagesDesktop();
+                        document.querySelectorAll('.chat-user').forEach(u => u.classList.remove('active'));
+                        el.classList.add('active');
+                    };
+                });
                 
                 if (attachImageBtn) {
                     attachImageBtn.onclick = () => imageInput.click();
                     imageInput.onchange = async () => {
                         const file = imageInput.files[0];
-                        if (!file) return;
-                        if (!file.type.startsWith('image/')) {
+                        if (!file || !file.type.startsWith('image/')) {
                             showToast('Можно загружать только изображения', true);
                             return;
                         }
@@ -1567,99 +1610,7 @@
                     };
                 }
                 
-                async function markMessagesAsRead(contactId) {
-                    await fetch('/api/messages/read', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ userId: currentUser.id, fromUserId: contactId })
-                    });
-                }
-                
-                if (!socket) {
-                    socket = io();
-                    socket.on('new_message', async (msg) => {
-                        if (msg.to === currentUser.id) {
-                            const refreshRes = await fetchJSON(`/api/messages/${currentUser.id}`);
-                            const newAllMessages = refreshRes.messages || [];
-                            const newUnreadMap = {};
-                            newAllMessages.forEach(m => {
-                                if (m.to === currentUser.id && !m.isRead) {
-                                    newUnreadMap[m.from] = (newUnreadMap[m.from] || 0) + 1;
-                                }
-                            });
-                            
-                            const userDiv = document.querySelector(`.chat-user[data-id="${msg.from}"]`);
-                            if (userDiv) {
-                                const currentUnread = newUnreadMap[msg.from] || 0;
-                                let badge = userDiv.querySelector('.unread-badge');
-                                if (badge) badge.textContent = currentUnread;
-                                else if (currentUnread > 0) {
-                                    badge = document.createElement('div');
-                                    badge.className = 'unread-badge';
-                                    badge.textContent = currentUnread;
-                                    userDiv.appendChild(badge);
-                                }
-                                let redDot = userDiv.querySelector('.red-dot');
-                                if (currentUnread > 0 && !redDot) {
-                                    redDot = document.createElement('div');
-                                    redDot.className = 'red-dot';
-                                    userDiv.appendChild(redDot);
-                                } else if (currentUnread === 0 && redDot) redDot.remove();
-                                
-                                const totalBadge = document.getElementById('totalUnreadBadge');
-                                const newTotalUnread = Object.values(newUnreadMap).reduce((a, b) => a + b, 0);
-                                if (totalBadge) totalBadge.textContent = newTotalUnread > 0 ? newTotalUnread : '';
-                            }
-                            showToast(`Новое сообщение`, false, true);
-                        }
-                        if (chatPartner && (msg.from === chatPartner.id || msg.to === chatPartner.id)) {
-                            if (msg.from === chatPartner.id) {
-                                await markMessagesAsRead(chatPartner.id);
-                                const userDiv = document.querySelector(`.chat-user[data-id="${chatPartner.id}"]`);
-                                if (userDiv) {
-                                    const badge = userDiv.querySelector('.unread-badge');
-                                    if (badge) badge.remove();
-                                    const redDot = userDiv.querySelector('.red-dot');
-                                    if (redDot) redDot.remove();
-                                }
-                            }
-                            await loadMessagesDesktop();
-                        }
-                    });
-                }
-                
-                document.querySelectorAll('.chat-user').forEach(el => {
-                    el.onclick = async () => {
-                        const id = el.dataset.id;
-                        const name = el.dataset.name;
-                        chatPartner = { id, name };
-                        await markMessagesAsRead(id);
-                        const badge = el.querySelector('.unread-badge');
-                        if (badge) badge.remove();
-                        const redDot = el.querySelector('.red-dot');
-                        if (redDot) redDot.remove();
-                        
-                        const refreshRes = await fetchJSON(`/api/messages/${currentUser.id}`);
-                        const newAllMessages = refreshRes.messages || [];
-                        const newUnreadMap = {};
-                        newAllMessages.forEach(m => {
-                            if (m.to === currentUser.id && !m.isRead) newUnreadMap[m.from] = (newUnreadMap[m.from] || 0) + 1;
-                        });
-                        const totalBadge = document.getElementById('totalUnreadBadge');
-                        const newTotalUnread = Object.values(newUnreadMap).reduce((a, b) => a + b, 0);
-                        if (totalBadge) totalBadge.textContent = newTotalUnread > 0 ? newTotalUnread : '';
-                        
-                        const msgInput = document.getElementById('msgInput');
-                        const sendBtn = document.getElementById('sendMsgBtn');
-                        if (msgInput) msgInput.disabled = false;
-                        if (sendBtn) sendBtn.disabled = false;
-                        await loadMessagesDesktop();
-                        document.querySelectorAll('.chat-user').forEach(u => u.classList.remove('active'));
-                        el.classList.add('active');
-                    };
-                });
-                
-                window.sendMessage = async () => {
+                window.sendMessageDesktop = async () => {
                     const input = document.getElementById('msgInput');
                     if (!input.value.trim() || !chatPartner) return;
                     const res = await fetch('/api/messages', { 
@@ -1667,8 +1618,7 @@
                         headers: { 'Content-Type': 'application/json' }, 
                         body: JSON.stringify({ from: currentUser.id, to: chatPartner.id, text: input.value })
                     });
-                    const data = await res.json();
-                    if (data.success) {
+                    if (res.ok) {
                         input.value = '';
                         await loadMessagesDesktop();
                     } else {
@@ -1676,31 +1626,33 @@
                     }
                 };
                 
-                async function loadMessagesDesktop() {
-                    if (!chatPartner) return;
-                    const res = await fetchJSON(`/api/messages/${currentUser.id}`);
-                    const all = (res.messages || []).filter(m => (m.from === chatPartner.id && m.to === currentUser.id) || (m.from === currentUser.id && m.to === chatPartner.id));
-                    const listDiv = document.getElementById('messagesList');
-                    if (listDiv) {
-                        listDiv.innerHTML = all.map(m => {
-                            let content = '';
-                            if (m.text) content += `<div class="message-text">${escapeHtml(m.text)}</div>`;
-                            if (m.image) content += `<img class="chat-image" src="${m.image}" onclick="window.open('${m.image}','_blank')">`;
-                            if (m.voice) content += `<div class="voice-message"><audio controls src="${m.voice}"></audio></div>`;
-                            return `
-                                <div class="message ${m.from === currentUser.id ? 'outgoing' : 'incoming'}">
-                                    ${content}
-                                    <div class="message-time">${new Date(m.createdAt).toLocaleTimeString()}</div>
-                                </div>
-                            `;
-                        }).join('');
-                        listDiv.scrollTop = listDiv.scrollHeight;
-                    }
+                // Подписка на новые сообщения через сокет (десктоп)
+                if (socket) {
+                    socket.off('new_message_desktop');
+                    socket.on('new_message', async (msg) => {
+                        if (msg.to === currentUser.id) {
+                            if (chatPartner && msg.from === chatPartner.id) {
+                                await markMessagesAsReadDesktop(chatPartner.id);
+                                await loadMessagesDesktop();
+                                const userDiv = document.querySelector(`.chat-user[data-id="${msg.from}"]`);
+                                if (userDiv) {
+                                    const badge = userDiv.querySelector('.unread-badge');
+                                    if (badge) badge.remove();
+                                    const redDot = userDiv.querySelector('.red-dot');
+                                    if (redDot) redDot.remove();
+                                }
+                            } else {
+                                // Обновляем список контактов
+                                initChat(container);
+                            }
+                            showToast(`Новое сообщение от ${msg.from}`, false, true);
+                        }
+                    });
                 }
             }
         }
-
-        // -------------------- WEBSOCKET --------------------
+        
+        // -------------------- WEBSOCKET И АВТООБНОВЛЕНИЕ --------------------
         function initSocket() {
             if (!socket) {
                 socket = io();
@@ -1727,35 +1679,38 @@
                         showToast(notif.title + ': ' + notif.message, false, true);
                     });
                 });
+                // Глобальная обработка новых сообщений (для любых вкладок)
                 socket.on('new_message', async (msg) => {
                     if (currentTab === 'chat') {
-                        if (chatPartner && (msg.from === chatPartner.id || msg.to === chatPartner.id)) {
-                            await fetch('/api/messages/read', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ userId: currentUser.id, fromUserId: msg.from })
-                            });
-                            if (window.innerWidth <= 768) {
-                                if (typeof loadMessagesMobile !== 'undefined') await loadMessagesMobile();
-                            } else {
-                                if (typeof loadMessagesDesktop !== 'undefined') await loadMessagesDesktop();
-                            }
-                        } else {
-                            const container = document.getElementById('dashboardContent');
-                            if (container) await initChat(container);
+                        // Если чат уже открыт, он сам обновится через свои обработчики (они переопределены в initChat)
+                        // Просто обновим данные пользователя для бейджиков
+                        await refreshUser();
+                        // Пересоздадим чат, если нужно обновить список контактов
+                        const container = document.getElementById('dashboardContent');
+                        if (container && (!chatPartner || msg.from !== chatPartner.id)) {
+                            await initChat(container);
                         }
                     }
                     showToast(`Новое сообщение`, false, true);
                 });
             }
         }
-
+        
         async function refreshUser() {
+            if (!currentUser) return;
             const res = await fetch(`/api/user/${currentUser.id}`);
             const data = await res.json();
             if (data.success) currentUser = data.user;
         }
-
+        
+        async function markMessagesAsRead(contactId) {
+            await fetch('/api/messages/read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: currentUser.id, fromUserId: contactId })
+            });
+        }
+        
         async function confirmAppointment(appId, clientId) {
             if (isLoading) return;
             isLoading = true;
@@ -1765,17 +1720,17 @@
             renderDashboard();
             isLoading = false;
         }
-
+        
         function startCall(roomId, role) { 
             window.location.href = `/call.html?room=${roomId}&role=${role}`; 
         }
-
+        
         function showDashboardSection(section) { 
             if (section === 'profile') profileEditMode = false;
             currentTab = section; 
             renderDashboard(); 
         }
-
+        
         function closeModal(modalId) {
             const modal = document.getElementById(modalId);
             if (modal) {
@@ -1783,7 +1738,7 @@
                 setTimeout(() => modal.remove(), 300);
             }
         }
-
+        
         function openLoginModal() {
             const modalHtml = `
                 <div class="modal" id="loginModal">
@@ -1803,7 +1758,7 @@
             const modal = document.getElementById('loginModal');
             setTimeout(() => modal.classList.add('active'), 10);
         }
-
+        
         function openRegisterModal() {
             const modalHtml = `
                 <div class="modal" id="registerModal">
@@ -1839,7 +1794,7 @@
                 psychFields.style.display = roleSelect.value === 'psychologist' ? 'block' : 'none';
             };
         }
-
+        
         async function login() {
             if (isLoading) return;
             const email = document.getElementById('loginEmail').value;
@@ -1868,7 +1823,7 @@
             if (btn) btn.disabled = false;
             isLoading = false;
         }
-
+        
         async function register() {
             if (isLoading) return;
             const fullName = document.getElementById('regName').value;
@@ -1915,13 +1870,13 @@
             if (btn) btn.disabled = false;
             isLoading = false;
         }
-
+        
         async function logout() { 
             localStorage.clear(); 
             showToast('Вы вышли из аккаунта');
             location.reload(); 
         }
-
+        
         // -------------------- ИНИЦИАЛИЗАЦИЯ --------------------
         async function init() {
             const userId = localStorage.getItem('userId');

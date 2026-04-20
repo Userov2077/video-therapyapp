@@ -27,6 +27,7 @@ const storage = multer.diskStorage({
         else if (file.fieldname === 'voice') cb(null, 'public/uploads/audio/');
         else if (file.fieldname === 'recording') cb(null, 'public/uploads/recordings/');
         else if (file.fieldname === 'certificate') cb(null, 'public/uploads/images/');
+        else if (file.fieldname === 'file') cb(null, 'public/uploads/images/');
         else cb(null, 'public/uploads/');
     },
     filename: (req, file, cb) => {
