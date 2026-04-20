@@ -111,264 +111,254 @@
     <div id="connection-status">📡 <span id="statusText">Подключение...</span></div>
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        let socket = null;
-        let localStream = null;
-        let peerConnection = null;
-        let currentRoomId = null;
-        let userRole = null;
-        let partnerId = null;
-        let currentUserId = null;
-        let mediaRecorder = null;
-        let recordedChunks = [];
-        let isRecording = false;
-        
-        const urlParams = new URLSearchParams(window.location.search);
-        currentRoomId = urlParams.get('room');
-        userRole = urlParams.get('role');
-        partnerId = urlParams.get('partner');
-        currentUserId = localStorage.getItem('userId');
-        
-        document.getElementById('roomId').textContent = currentRoomId;
-        
-        const localVideo = document.getElementById('localVideo');
-        const remoteVideo = document.getElementById('remoteVideo');
-        const waitingMessage = document.getElementById('waitingMessage');
-        const toggleMicBtn = document.getElementById('toggleMic');
-        const toggleCamBtn = document.getElementById('toggleCam');
-        const recordBtn = document.getElementById('recordBtn');
-        const endCallBtn = document.getElementById('endCall');
-        const statusText = document.getElementById('statusText');
-        const chatMessages = document.getElementById('chatMessages');
-        const chatInput = document.getElementById('chatInput');
-        const sendChatBtn = document.getElementById('sendChatBtn');
-        const recordingIndicator = document.getElementById('recordingIndicator');
-        
-        function showToast(message, isError = false) {
-            const toast = document.createElement('div');
-            toast.style.cssText = `position:fixed; bottom:30px; left:50%; transform:translateX(-50%); background:rgba(30,35,32,0.95); backdrop-filter:blur(20px); border:1px solid ${isError ? '#dc2626' : '#8bca8b'}; border-radius:16px; padding:10px 20px; color:${isError ? '#ff6b6b' : '#8bca8b'}; font-size:13px; z-index:3000; white-space:nowrap; max-width:90%; white-space:normal; text-align:center;`;
-            toast.textContent = message;
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 3000);
-        }
-        
-        function updateStatus(message, isError = false) {
-            statusText.textContent = message;
-            statusText.style.color = isError ? '#ff6b6b' : '#8bca8b';
-            console.log(`📡 ${message}`);
-        }
-        
-        function addChatMessage(text, isOutgoing = false, time = null) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `chat-message ${isOutgoing ? 'outgoing' : 'incoming'}`;
-            const timeStr = time ? new Date(time).toLocaleTimeString() : new Date().toLocaleTimeString();
-            messageDiv.innerHTML = `<div>${escapeHtml(text)}</div><div class="chat-message-time">${timeStr}</div>`;
-            chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-        
-        function escapeHtml(str) {
-            if (!str) return '';
-            return str.replace(/[&<>]/g, function(m) {
-                if (m === '&') return '&amp;';
-                if (m === '<') return '&lt;';
-                if (m === '>') return '&gt;';
-                return m;
-            });
-        }
-        
-        async function startCall() {
-            try {
-                updateStatus('Запрос камеры...');
-                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                localVideo.srcObject = localStream;
-                updateStatus('Камера готова');
-                socket = io();
-                socket.on('connect', () => {
-                    updateStatus('Сервер подключен');
-                    socket.emit('join-call-room', currentRoomId, currentUserId, userRole);
+        (function() {
+            let socket = null;
+            let localStream = null;
+            let peerConnection = null;
+            let currentRoomId = null;
+            let userRole = null;
+            let partnerSocketId = null; // socket.id партнёра, а не userId
+            let currentUserId = null;
+            let mediaRecorder = null;
+            let recordedChunks = [];
+            let isRecording = false;
+            
+            const urlParams = new URLSearchParams(window.location.search);
+            currentRoomId = urlParams.get('room');
+            userRole = urlParams.get('role');
+            currentUserId = localStorage.getItem('userId');
+            
+            document.getElementById('roomId').textContent = currentRoomId;
+            
+            const localVideo = document.getElementById('localVideo');
+            const remoteVideo = document.getElementById('remoteVideo');
+            const waitingMessage = document.getElementById('waitingMessage');
+            const toggleMicBtn = document.getElementById('toggleMic');
+            const toggleCamBtn = document.getElementById('toggleCam');
+            const recordBtn = document.getElementById('recordBtn');
+            const endCallBtn = document.getElementById('endCall');
+            const statusText = document.getElementById('statusText');
+            const chatMessages = document.getElementById('chatMessages');
+            const chatInput = document.getElementById('chatInput');
+            const sendChatBtn = document.getElementById('sendChatBtn');
+            const recordingIndicator = document.getElementById('recordingIndicator');
+            
+            function showToast(message, isError = false) {
+                const toast = document.createElement('div');
+                toast.style.cssText = `position:fixed; bottom:30px; left:50%; transform:translateX(-50%); background:rgba(30,35,32,0.95); backdrop-filter:blur(20px); border:1px solid ${isError ? '#dc2626' : '#8bca8b'}; border-radius:16px; padding:10px 20px; color:${isError ? '#ff6b6b' : '#8bca8b'}; font-size:13px; z-index:3000; white-space:nowrap; max-width:90%; white-space:normal; text-align:center;`;
+                toast.textContent = message;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 3000);
+            }
+            
+            function updateStatus(message, isError = false) {
+                statusText.textContent = message;
+                statusText.style.color = isError ? '#ff6b6b' : '#8bca8b';
+                console.log(`📡 ${message}`);
+            }
+            
+            function addChatMessage(text, isOutgoing = false, time = null) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `chat-message ${isOutgoing ? 'outgoing' : 'incoming'}`;
+                const timeStr = time ? new Date(time).toLocaleTimeString() : new Date().toLocaleTimeString();
+                messageDiv.innerHTML = `<div>${escapeHtml(text)}</div><div class="chat-message-time">${timeStr}</div>`;
+                chatMessages.appendChild(messageDiv);
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+            
+            function escapeHtml(str) {
+                if (!str) return '';
+                return str.replace(/[&<>]/g, function(m) {
+                    if (m === '&') return '&amp;';
+                    if (m === '<') return '&lt;';
+                    if (m === '>') return '&gt;';
+                    return m;
                 });
-                socket.on('room-joined', () => updateStatus('Ожидание собеседника...'));
-                socket.on('call-ready', (data) => {
-                    updateStatus('Собеседник найден, установка соединения...');
-                    partnerId = data.partnerId;
-                    initWebRTC();
-                });
-                socket.on('offer', async (data) => {
-                    partnerId = data.from;
-                    if (!peerConnection) await initWebRTC();
-                    await handleOffer(data);
-                });
-                socket.on('answer', async (data) => await handleAnswer(data));
-                socket.on('ice-candidate', async (data) => {
-                    if (peerConnection) await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-                });
-                socket.on('call-message', (data) => addChatMessage(data.text, false, data.time));
-                socket.on('recording-started', () => {
+            }
+            
+            async function initWebRTC() {
+                if (peerConnection) return;
+                updateStatus('Настройка соединения...');
+                const config = {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' },
+                        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+                        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
+                    ]
+                };
+                peerConnection = new RTCPeerConnection(config);
+                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+                peerConnection.ontrack = (event) => {
+                    updateStatus('✅ Видео получено!');
+                    remoteVideo.srcObject = event.streams[0];
+                    waitingMessage.style.display = 'none';
+                };
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate && partnerSocketId) {
+                        socket.emit('ice-candidate', { target: partnerSocketId, candidate: event.candidate });
+                    }
+                };
+                peerConnection.oniceconnectionstatechange = () => {
+                    const state = peerConnection.iceConnectionState;
+                    if (state === 'connected') updateStatus('✅ Соединение установлено!');
+                    if (state === 'failed') updateStatus('❌ Соединение не удалось', true);
+                };
+                if (userRole === 'psychologist') {
+                    const offer = await peerConnection.createOffer();
+                    await peerConnection.setLocalDescription(offer);
+                    socket.emit('offer', { target: partnerSocketId, sdp: offer });
+                }
+            }
+            
+            async function startCall() {
+                try {
+                    updateStatus('Запрос камеры...');
+                    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                    localVideo.srcObject = localStream;
+                    updateStatus('Камера готова');
+                    socket = io();
+                    socket.on('connect', () => {
+                        updateStatus('Сервер подключен');
+                        socket.emit('join-call-room', currentRoomId, currentUserId, userRole);
+                    });
+                    socket.on('room-joined', () => updateStatus('Ожидание собеседника...'));
+                    socket.on('call-ready', (data) => {
+                        updateStatus('Собеседник найден, установка соединения...');
+                        partnerSocketId = data.partnerId;
+                        initWebRTC();
+                    });
+                    socket.on('offer', async (data) => {
+                        partnerSocketId = data.from;
+                        if (!peerConnection) await initWebRTC();
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                        const answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+                        socket.emit('answer', { target: partnerSocketId, sdp: answer });
+                    });
+                    socket.on('answer', async (data) => {
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                    });
+                    socket.on('ice-candidate', async (data) => {
+                        if (peerConnection) {
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                        }
+                    });
+                    socket.on('call-message', (data) => {
+                        addChatMessage(data.text, false, data.time);
+                    });
+                    socket.on('call-ended', () => {
+                        updateStatus('Звонок завершен');
+                        if (isRecording) stopRecording();
+                        setTimeout(() => window.location.href = '/', 1500);
+                    });
+                    socket.on('partner-disconnected', () => {
+                        updateStatus('Собеседник отключился', true);
+                        alert('Собеседник отключился');
+                        window.location.href = '/';
+                    });
+                    
+                    sendChatBtn.onclick = () => {
+                        const text = chatInput.value.trim();
+                        if (!text || !partnerSocketId) return;
+                        addChatMessage(text, true);
+                        socket.emit('call-message', { text: text });
+                        chatInput.value = '';
+                    };
+                    chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChatBtn.click(); };
+                } catch (error) {
+                    updateStatus('Нет доступа к камере', true);
+                    alert('Не удалось получить доступ к камере');
+                }
+            }
+            
+            async function startRecording() {
+                if (!localStream) return;
+                try {
+                    updateStatus('🎥 Начинаем запись...');
+                    recordedChunks = [];
+                    const audioContext = new AudioContext();
+                    const dest = audioContext.createMediaStreamDestination();
+                    const micTrack = localStream.getAudioTracks()[0];
+                    const micStream = new MediaStream([micTrack]);
+                    const micSource = audioContext.createMediaStreamSource(micStream);
+                    micSource.connect(dest);
+                    const recordingStream = new MediaStream([...dest.stream.getAudioTracks()]);
+                    mediaRecorder = new MediaRecorder(recordingStream, { mimeType: 'audio/webm' });
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) recordedChunks.push(event.data);
+                    };
+                    mediaRecorder.onstop = async () => {
+                        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+                        const formData = new FormData();
+                        formData.append('recording', blob, `recording-${Date.now()}.webm`);
+                        formData.append('from', currentUserId);
+                        formData.append('to', partnerSocketId || 'unknown');
+                        formData.append('roomId', currentRoomId);
+                        const res = await fetch('/api/upload-recording', { method: 'POST', body: formData });
+                        const data = await res.json();
+                        if (data.success) {
+                            updateStatus('✅ Запись сохранена!');
+                            showToast('Запись звонка сохранена');
+                        } else {
+                            updateStatus('❌ Ошибка сохранения записи', true);
+                        }
+                        audioContext.close();
+                    };
+                    mediaRecorder.start(1000);
+                    isRecording = true;
+                    recordBtn.classList.add('recording-active');
                     recordingIndicator.classList.add('show');
-                    updateStatus('🔴 Идет запись звонка');
-                });
-                socket.on('recording-stopped', () => {
+                    updateStatus('🔴 Идет запись звонка...');
+                } catch (err) {
+                    updateStatus('❌ Ошибка записи: ' + err.message, true);
+                    console.error(err);
+                }
+            }
+            
+            function stopRecording() {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                    isRecording = false;
+                    recordBtn.classList.remove('recording-active');
                     recordingIndicator.classList.remove('show');
                     updateStatus('✅ Запись завершена');
-                });
-                socket.on('call-ended', () => {
-                    updateStatus('Звонок завершен');
-                    if (isRecording) stopRecording();
-                    setTimeout(() => window.location.href = '/', 1500);
-                });
-                socket.on('partner-disconnected', () => {
-                    updateStatus('Собеседник отключился', true);
-                    alert('Собеседник отключился');
-                    window.location.href = '/';
-                });
-                sendChatBtn.onclick = () => {
-                    const text = chatInput.value.trim();
-                    if (!text) return;
-                    addChatMessage(text, true);
-                    socket.emit('call-message', { from: currentUserId, to: partnerId, text: text });
-                    chatInput.value = '';
-                };
-                chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChatBtn.click(); };
-            } catch (error) {
-                updateStatus('Нет доступа к камере', true);
-                alert('Не удалось получить доступ к камере');
+                }
             }
-        }
-        
-        async function initWebRTC() {
-            if (peerConnection) return;
-            updateStatus('Настройка соединения...');
-            const config = {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:stun2.l.google.com:19302' },
-                    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-                    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
-                ]
+            
+            recordBtn.onclick = async () => {
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    await startRecording();
+                }
             };
-            peerConnection = new RTCPeerConnection(config);
-            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-            peerConnection.ontrack = (event) => {
-                updateStatus('✅ Видео получено!');
-                remoteVideo.srcObject = event.streams[0];
-                waitingMessage.style.display = 'none';
+            
+            toggleMicBtn.onclick = () => {
+                if (localStream) {
+                    const track = localStream.getAudioTracks()[0];
+                    track.enabled = !track.enabled;
+                    toggleMicBtn.classList.toggle('muted');
+                }
             };
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate && partnerId) socket.emit('ice-candidate', { target: partnerId, candidate: event.candidate });
+            
+            toggleCamBtn.onclick = () => {
+                if (localStream) {
+                    const track = localStream.getVideoTracks()[0];
+                    track.enabled = !track.enabled;
+                    toggleCamBtn.classList.toggle('muted');
+                }
             };
-            peerConnection.oniceconnectionstatechange = () => {
-                const state = peerConnection.iceConnectionState;
-                if (state === 'connected') updateStatus('✅ Соединение установлено!');
-                if (state === 'failed') updateStatus('❌ Соединение не удалось', true);
+            
+            endCallBtn.onclick = () => {
+                if (socket) socket.emit('end-call');
+                if (isRecording) stopRecording();
+                window.location.href = '/';
             };
-            if (userRole === 'psychologist') await createOffer();
-        }
-        
-        async function createOffer() {
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-            socket.emit('offer', { target: partnerId, sdp: offer });
-        }
-        
-        async function handleOffer(data) {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            const answer = await peerConnection.createAnswer();
-            await peerConnection.setLocalDescription(answer);
-            socket.emit('answer', { target: partnerId, sdp: answer });
-        }
-        
-        async function handleAnswer(data) {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
-        }
-
-        async function startRecording() {
-            if (!localStream) return;
-            try {
-                updateStatus('🎥 Начинаем запись...');
-                recordedChunks = [];
-                const audioContext = new AudioContext();
-                const dest = audioContext.createMediaStreamDestination();
-                const micTrack = localStream.getAudioTracks()[0];
-                const micStream = new MediaStream([micTrack]);
-                const micSource = audioContext.createMediaStreamSource(micStream);
-                micSource.connect(dest);
-                const recordingStream = new MediaStream([...dest.stream.getAudioTracks()]);
-                mediaRecorder = new MediaRecorder(recordingStream, { mimeType: 'audio/webm' });
-                mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) recordedChunks.push(event.data);
-                };
-                mediaRecorder.onstop = async () => {
-                    const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-                    const formData = new FormData();
-                    formData.append('recording', blob, `recording-${Date.now()}.webm`);
-                    formData.append('from', currentUserId);
-                    formData.append('to', partnerId);
-                    formData.append('roomId', currentRoomId);
-                    const res = await fetch('/api/upload-recording', { method: 'POST', body: formData });
-                    const data = await res.json();
-                    if (data.success) {
-                        updateStatus('✅ Запись сохранена!');
-                        showToast('Запись звонка сохранена');
-                    } else {
-                        updateStatus('❌ Ошибка сохранения записи', true);
-                    }
-                    audioContext.close();
-                };
-                mediaRecorder.start(1000);
-                isRecording = true;
-                recordBtn.classList.add('recording-active');
-                recordingIndicator.classList.add('show');
-                updateStatus('🔴 Идет запись звонка...');
-            } catch (err) {
-                updateStatus('❌ Ошибка записи: ' + err.message, true);
-                console.error(err);
-            }
-        }
-        
-        function stopRecording() {
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                mediaRecorder.stop();
-                isRecording = false;
-                recordBtn.classList.remove('recording-active');
-                recordingIndicator.classList.remove('show');
-                updateStatus('✅ Запись завершена');
-            }
-        }
-        
-        recordBtn.onclick = async () => {
-            if (isRecording) {
-                stopRecording();
-                recordBtn.classList.remove('recording-active');
-            } else {
-                await startRecording();
-                recordBtn.classList.add('recording-active');
-            }
-        };
-        
-        toggleMicBtn.onclick = () => {
-            if (localStream) {
-                const track = localStream.getAudioTracks()[0];
-                track.enabled = !track.enabled;
-                toggleMicBtn.classList.toggle('muted');
-            }
-        };
-        
-        toggleCamBtn.onclick = () => {
-            if (localStream) {
-                const track = localStream.getVideoTracks()[0];
-                track.enabled = !track.enabled;
-                toggleCamBtn.classList.toggle('muted');
-            }
-        };
-        
-        endCallBtn.onclick = () => {
-            if (socket) socket.emit('end-call');
-            if (isRecording) stopRecording();
-            window.location.href = '/';
-        };
-        
-        startCall();
+            
+            startCall();
+        })();
     </script>
 </body>
 </html>

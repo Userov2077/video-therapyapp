@@ -42,19 +42,19 @@ const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
 const dataPath = './data/';
 if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath);
 const files = ['users', 'posts', 'likes', 'comments', 'messages', 'appointments', 'recordings'];
-const data = {};
+const globalData = {};
 files.forEach(f => {
-    try { data[f] = JSON.parse(fs.readFileSync(`${dataPath}${f}.json`, 'utf8')); }
-    catch(e) { data[f] = []; }
+    try { globalData[f] = JSON.parse(fs.readFileSync(`${dataPath}${f}.json`, 'utf8')); }
+    catch(e) { globalData[f] = []; }
 });
 
-function saveData() { files.forEach(f => fs.writeFileSync(`${dataPath}${f}.json`, JSON.stringify(data[f], null, 2))); }
-const getUser = id => data.users.find(u => u.id === id);
+function saveData() { files.forEach(f => fs.writeFileSync(`${dataPath}${f}.json`, JSON.stringify(globalData[f], null, 2))); }
+const getUser = id => globalData.users.find(u => u.id === id);
 
 // ---- Регистрация и авторизация ----
 app.post('/api/register', (req, res) => {
     const { fullName, email, phone, password, role, specialization, experience, about } = req.body;
-    if (data.users.find(u => u.email === email)) return res.json({ success: false, error: 'Email уже используется' });
+    if (globalData.users.find(u => u.email === email)) return res.json({ success: false, error: 'Email уже используется' });
     if (role === 'psychologist' && (!specialization || !experience)) return res.json({ success: false, error: 'Заполните специализацию и опыт' });
     
     const newUser = {
@@ -78,14 +78,14 @@ app.post('/api/register', (req, res) => {
         clients: [],
         notifications: []
     };
-    data.users.push(newUser);
+    globalData.users.push(newUser);
     saveData();
     res.json({ success: true, userId: newUser.id, role: newUser.role });
 });
 
 app.post('/api/login', (req, res) => {
     const { email, password } = req.body;
-    const user = data.users.find(u => u.email === email && u.password === password);
+    const user = globalData.users.find(u => u.email === email && u.password === password);
     if (user) res.json({ success: true, userId: user.id, role: user.role, fullName: user.fullName });
     else res.json({ success: false, error: 'Неверный email или пароль' });
 });
@@ -154,7 +154,7 @@ app.post('/api/upload-recording', upload.single('recording'), (req, res) => {
         roomId: req.body.roomId,
         createdAt: new Date().toISOString()
     };
-    data.recordings.push(recording);
+    globalData.recordings.push(recording);
     saveData();
     res.json({ success: true, recordingUrl: recording.url });
 });
@@ -205,12 +205,12 @@ app.delete('/api/achievement/:userId/:achievementId', (req, res) => {
 
 // ---- Посты ----
 app.get('/api/posts', (req, res) => {
-    const posts = [...data.posts].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const posts = [...globalData.posts].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
     const enriched = posts.map(post => {
         const author = getUser(post.authorId);
-        const likesCount = data.likes.filter(l => l.postId === post.id).length;
-        const comments = data.comments.filter(c => c.postId === post.id).map(c => ({ ...c, author: getUser(c.authorId) }));
-        const userLiked = req.query.userId ? data.likes.some(l => l.postId === post.id && l.userId === req.query.userId) : false;
+        const likesCount = globalData.likes.filter(l => l.postId === post.id).length;
+        const comments = globalData.comments.filter(c => c.postId === post.id).map(c => ({ ...c, author: getUser(c.authorId) }));
+        const userLiked = req.query.userId ? globalData.likes.some(l => l.postId === post.id && l.userId === req.query.userId) : false;
         return { 
             ...post, 
             author: { id: author.id, fullName: author.fullName, avatar: author.avatar },
@@ -234,7 +234,7 @@ app.post('/api/posts', upload.single('image'), (req, res) => {
         image: req.file ? `/uploads/images/${req.file.filename}` : null, 
         createdAt: new Date().toISOString()
     };
-    data.posts.push(newPost);
+    globalData.posts.push(newPost);
     saveData();
     io.emit('post_created', newPost);
     res.json({ success: true });
@@ -243,7 +243,7 @@ app.post('/api/posts', upload.single('image'), (req, res) => {
 app.put('/api/posts/:id', upload.single('image'), (req, res) => {
     const postId = req.params.id;
     const { authorId, text } = req.body;
-    const post = data.posts.find(p => p.id === postId);
+    const post = globalData.posts.find(p => p.id === postId);
     if (!post) return res.json({ success: false, error: 'Пост не найден' });
     if (post.authorId !== authorId) return res.json({ success: false, error: 'Нет прав' });
     post.text = text;
@@ -256,12 +256,12 @@ app.put('/api/posts/:id', upload.single('image'), (req, res) => {
 app.delete('/api/posts/:id', (req, res) => {
     const postId = req.params.id;
     const { authorId } = req.body;
-    const post = data.posts.find(p => p.id === postId);
+    const post = globalData.posts.find(p => p.id === postId);
     if (!post) return res.json({ success: false, error: 'Пост не найден' });
     if (post.authorId !== authorId) return res.json({ success: false, error: 'Нет прав' });
-    data.posts = data.posts.filter(p => p.id !== postId);
-    data.likes = data.likes.filter(l => l.postId !== postId);
-    data.comments = data.comments.filter(c => c.postId !== postId);
+    globalData.posts = globalData.posts.filter(p => p.id !== postId);
+    globalData.likes = globalData.likes.filter(l => l.postId !== postId);
+    globalData.comments = globalData.comments.filter(c => c.postId !== postId);
     saveData();
     io.emit('post_deleted', postId);
     res.json({ success: true });
@@ -278,7 +278,7 @@ app.post('/api/posts/:id/comment', (req, res) => {
         text, 
         createdAt: new Date().toISOString() 
     };
-    data.comments.push(newComment);
+    globalData.comments.push(newComment);
     saveData();
     const author = getUser(userId);
     const commentWithAuthor = { ...newComment, author: { id: author.id, fullName: author.fullName, avatar: author.avatar } };
@@ -289,7 +289,7 @@ app.post('/api/posts/:id/comment', (req, res) => {
 app.put('/api/comments/:id', (req, res) => {
     const commentId = req.params.id;
     const { userId, text } = req.body;
-    const comment = data.comments.find(c => c.id === commentId);
+    const comment = globalData.comments.find(c => c.id === commentId);
     if (!comment) return res.json({ success: false, error: 'Комментарий не найден' });
     if (comment.authorId !== userId) return res.json({ success: false, error: 'Нет прав' });
     comment.text = text;
@@ -301,10 +301,10 @@ app.put('/api/comments/:id', (req, res) => {
 app.delete('/api/comments/:id', (req, res) => {
     const commentId = req.params.id;
     const { userId } = req.body;
-    const comment = data.comments.find(c => c.id === commentId);
+    const comment = globalData.comments.find(c => c.id === commentId);
     if (!comment) return res.json({ success: false, error: 'Комментарий не найден' });
     if (comment.authorId !== userId) return res.json({ success: false, error: 'Нет прав' });
-    data.comments = data.comments.filter(c => c.id !== commentId);
+    globalData.comments = globalData.comments.filter(c => c.id !== commentId);
     saveData();
     io.emit('comment_deleted', { commentId, postId: comment.postId });
     res.json({ success: true });
@@ -313,16 +313,16 @@ app.delete('/api/comments/:id', (req, res) => {
 app.post('/api/posts/:id/like', (req, res) => {
     const { userId } = req.body;
     const postId = req.params.id;
-    const existing = data.likes.find(l => l.postId === postId && l.userId === userId);
+    const existing = globalData.likes.find(l => l.postId === postId && l.userId === userId);
     if (existing) {
-        data.likes = data.likes.filter(l => l !== existing);
-        const likesCount = data.likes.filter(l => l.postId === postId).length;
+        globalData.likes = globalData.likes.filter(l => l !== existing);
+        const likesCount = globalData.likes.filter(l => l.postId === postId).length;
         saveData();
         io.emit('post_liked', { postId, likesCount, userId, liked: false });
         res.json({ success: true, liked: false, likesCount });
     } else {
-        data.likes.push({ id: Date.now().toString(), postId, userId, createdAt: new Date().toISOString() });
-        const likesCount = data.likes.filter(l => l.postId === postId).length;
+        globalData.likes.push({ id: Date.now().toString(), postId, userId, createdAt: new Date().toISOString() });
+        const likesCount = globalData.likes.filter(l => l.postId === postId).length;
         saveData();
         io.emit('post_liked', { postId, likesCount, userId, liked: true });
         res.json({ success: true, liked: true, likesCount });
@@ -344,7 +344,7 @@ app.post('/api/appointment', (req, res) => {
     
     const roomId = Math.random().toString(36).substring(2, 10).toUpperCase();
     const appointment = { id: Date.now().toString(), psychologistId, psychologistName: psychologist.fullName, clientId, clientName: client.fullName, date, time, roomId, status: 'pending', createdAt: new Date().toISOString() };
-    data.appointments.push(appointment);
+    globalData.appointments.push(appointment);
     client.appointments.push(appointment);
     psychologist.clients.push({ clientId, clientName: client.fullName, appointmentId: appointment.id, date, time, status: 'pending', roomId });
     const notification = { id: Date.now().toString(), type: 'new_appointment', title: 'Новая заявка', message: `${client.fullName} хочет записаться на ${date} в ${time}`, appointmentId: appointment.id, roomId, read: false, createdAt: new Date().toISOString() };
@@ -357,7 +357,7 @@ app.post('/api/appointment', (req, res) => {
 
 app.post('/api/appointment/confirm', (req, res) => {
     const { appointmentId, psychologistId, clientId } = req.body;
-    const appointment = data.appointments.find(a => a.id === appointmentId);
+    const appointment = globalData.appointments.find(a => a.id === appointmentId);
     if (!appointment) return res.json({ success: false });
     appointment.status = 'confirmed';
     const psychologist = getUser(psychologistId);
@@ -378,8 +378,8 @@ app.get('/api/messages/:userId', (req, res) => {
     const userId = req.params.userId;
     const user = getUser(userId);
     if (!user) return res.json({ success: false });
-    let contactIds = user.role === 'client' ? data.users.filter(u => u.role === 'psychologist').map(u => u.id) : [...new Set([...data.users.filter(u => u.role === 'psychologist' && u.id !== userId).map(u => u.id), ...(user.clients || []).map(c => c.clientId)])];
-    const messages = data.messages.filter(m => m.from === userId || m.to === userId);
+    let contactIds = user.role === 'client' ? globalData.users.filter(u => u.role === 'psychologist').map(u => u.id) : [...new Set([...globalData.users.filter(u => u.role === 'psychologist' && u.id !== userId).map(u => u.id), ...(user.clients || []).map(c => c.clientId)])];
+    const messages = globalData.messages.filter(m => m.from === userId || m.to === userId);
     const contacts = contactIds.map(id => getUser(id)).filter(u => u).map(u => ({ id: u.id, fullName: u.fullName, avatar: u.avatar, role: u.role }));
     res.json({ success: true, messages, users: contacts });
 });
@@ -387,7 +387,7 @@ app.get('/api/messages/:userId', (req, res) => {
 app.post('/api/messages', (req, res) => {
     const { from, to, text, image, voice } = req.body;
     const newMsg = { id: Date.now().toString(), from, to, text: text || '', image: image || null, voice: voice || null, createdAt: new Date().toISOString(), isRead: false };
-    data.messages.push(newMsg);
+    globalData.messages.push(newMsg);
     saveData();
     io.to(to).emit('new_message', newMsg);
     res.json({ success: true });
@@ -395,13 +395,13 @@ app.post('/api/messages', (req, res) => {
 
 app.post('/api/messages/read', (req, res) => {
     const { userId, fromUserId } = req.body;
-    data.messages.filter(m => m.to === userId && m.from === fromUserId && !m.isRead).forEach(m => m.isRead = true);
+    globalData.messages.filter(m => m.to === userId && m.from === fromUserId && !m.isRead).forEach(m => m.isRead = true);
     saveData();
     res.json({ success: true });
 });
 
 app.get('/api/psychologists', (req, res) => {
-    res.json({ success: true, psychologists: data.users.filter(u => u.role === 'psychologist').map(({ password, ...u }) => u) });
+    res.json({ success: true, psychologists: globalData.users.filter(u => u.role === 'psychologist').map(({ password, ...u }) => u) });
 });
 
 // ---- WebRTC комнаты ----
@@ -413,51 +413,70 @@ io.on('connection', (socket) => {
     });
 
     socket.on('join-call-room', (roomId, userId, userType) => {
-        if (!activeRooms.has(roomId)) activeRooms.set(roomId, { psychologist: null, client: null, users: new Map() });
-        const room = activeRooms.get(roomId);
-        room.users.set(socket.id, { userId, userType });
-        if (userType === 'psychologist') room.psychologist = socket.id;
-        else room.client = socket.id;
-        socket.join(roomId);
-        socket.roomId = roomId;
-        socket.userId = userId;
-        socket.userType = userType;
-        if (room.psychologist && room.client) {
-            io.to(room.psychologist).emit('call-ready', { partnerId: room.client });
-            io.to(room.client).emit('call-ready', { partnerId: room.psychologist });
+        try {
+            if (!activeRooms.has(roomId)) activeRooms.set(roomId, { psychologist: null, client: null, users: new Map() });
+            const room = activeRooms.get(roomId);
+            room.users.set(socket.id, { userId, userType });
+            if (userType === 'psychologist') room.psychologist = socket.id;
+            else room.client = socket.id;
+            socket.join(roomId);
+            socket.roomId = roomId;
+            socket.userId = userId;
+            socket.userType = userType;
+            if (room.psychologist && room.client) {
+                io.to(room.psychologist).emit('call-ready', { partnerId: room.client });
+                io.to(room.client).emit('call-ready', { partnerId: room.psychologist });
+            }
+            socket.emit('room-joined');
+        } catch (err) {
+            console.error('join-call-room error:', err);
         }
-        socket.emit('room-joined');
     });
     
-    socket.on('call-message', (data) => {
-        const room = activeRooms.get(socket.roomId);
-        if (room) {
-            const targetId = socket.userType === 'psychologist' ? room.client : room.psychologist;
-            if (targetId) {
-                io.to(targetId).emit('call-message', {
-                    from: socket.userId,
-                    text: data.text,
-                    time: new Date().toISOString()
-                });
+    socket.on('call-message', (msgData) => {
+        try {
+            const room = activeRooms.get(socket.roomId);
+            if (room) {
+                const targetId = socket.userType === 'psychologist' ? room.client : room.psychologist;
+                if (targetId) {
+                    io.to(targetId).emit('call-message', {
+                        from: socket.userId,
+                        text: msgData.text,
+                        time: new Date().toISOString()
+                    });
+                }
+                // Сохраняем сообщение в общий чат (глобальный массив messages)
+                const newMsg = { 
+                    id: Date.now().toString(), 
+                    from: socket.userId, 
+                    to: socket.userType === 'psychologist' ? (room.client ? globalData.users.find(u => u.id === socket.userId)?.role === 'psychologist' ? 'client' : 'psychologist' : 'unknown') : (room.psychologist ? 'psychologist' : 'unknown'),
+                    text: msgData.text, 
+                    createdAt: new Date().toISOString(), 
+                    isRead: false 
+                };
+                globalData.messages.push(newMsg);
+                saveData();
             }
-            const newMsg = { 
-                id: Date.now().toString(), 
-                from: socket.userId, 
-                to: socket.userType === 'psychologist' ? 'client_id_placeholder' : 'psychologist_id_placeholder', 
-                text: data.text, 
-                createdAt: new Date().toISOString(), 
-                isRead: false 
-            };
-            data.messages.push(newMsg);
-            saveData();
+        } catch (err) {
+            console.error('call-message error:', err);
         }
     });
     
     socket.on('offer', (data) => socket.to(data.target).emit('offer', { sdp: data.sdp, from: socket.id }));
     socket.on('answer', (data) => socket.to(data.target).emit('answer', { sdp: data.sdp, from: socket.id }));
     socket.on('ice-candidate', (data) => socket.to(data.target).emit('ice-candidate', { candidate: data.candidate, from: socket.id }));
-    socket.on('end-call', () => { if (socket.roomId) { socket.to(socket.roomId).emit('call-ended'); activeRooms.delete(socket.roomId); } });
-    socket.on('disconnect', () => { if (socket.roomId) { socket.to(socket.roomId).emit('partner-disconnected'); activeRooms.delete(socket.roomId); } });
+    socket.on('end-call', () => { 
+        if (socket.roomId) { 
+            socket.to(socket.roomId).emit('call-ended'); 
+            activeRooms.delete(socket.roomId); 
+        } 
+    });
+    socket.on('disconnect', () => { 
+        if (socket.roomId) { 
+            socket.to(socket.roomId).emit('partner-disconnected'); 
+            activeRooms.delete(socket.roomId); 
+        } 
+    });
 });
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
