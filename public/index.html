@@ -2,12 +2,12 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=1.0">
     <title>Therapy Call | Сообщество психологов</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body { font-family: 'Inter', sans-serif; background: #000; color: #fff; overflow-x: hidden; }
         
         .video-background {
@@ -41,9 +41,9 @@
         .nav-links a { color: rgba(255, 255, 255, 0.7); text-decoration: none; font-weight: 500; font-size: 13px; cursor: pointer; transition: color 0.3s; }
         .nav-links a:hover { color: #8bca8b; }
         .auth-buttons { display: flex; gap: 8px; align-items: center; }
-        .btn-login { background: transparent; border: 1px solid rgba(139, 202, 139, 0.5); padding: 6px 16px; border-radius: 30px; color: white; font-weight: 500; font-size: 13px; cursor: pointer; transition: all 0.3s; }
+        .btn-login { background: transparent; border: 1px solid rgba(139, 202, 139, 0.5); padding: 8px 20px; border-radius: 30px; color: white; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s; }
         .btn-login:hover { background: rgba(139, 202, 139, 0.1); border-color: #8bca8b; }
-        .btn-register-nav { background: linear-gradient(135deg, #8bca8b, #5a9e5a); border: none; padding: 6px 16px; border-radius: 30px; color: white; font-weight: 600; font-size: 13px; cursor: pointer; transition: all 0.3s; }
+        .btn-register-nav { background: linear-gradient(135deg, #8bca8b, #5a9e5a); border: none; padding: 8px 20px; border-radius: 30px; color: white; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.3s; }
         .btn-register-nav:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(139, 202, 139, 0.3); }
         .user-menu { display: flex; align-items: center; gap: 10px; cursor: pointer; position: relative; }
         .user-avatar { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, #8bca8b, #5a9e5a); overflow: hidden; }
@@ -90,21 +90,19 @@
         .post-stats button.liked { color: #8bca8b; }
         .comments-section { margin-top: 12px; }
         .comments-list { max-height: 250px; overflow-y: auto; margin-bottom: 12px; }
-        .comment { display: flex; gap: 10px; margin-bottom: 12px; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 16px; position: relative; }
+        .comment { display: flex; gap: 10px; margin-bottom: 12px; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 16px; }
         .comment-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
         .comment-content { flex: 1; }
         .comment-author { font-weight: 600; font-size: 12px; margin-bottom: 3px; }
         .comment-text { font-size: 12px; opacity: 0.8; line-height: 1.4; }
         .comment-time { font-size: 9px; opacity: 0.4; margin-top: 3px; }
-        .comment-actions { display: flex; gap: 6px; margin-left: 8px; align-items: center; }
-        .comment-actions button { background: none; border: none; color: rgba(255,255,255,0.5); cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: 10px; }
-        .comment-actions button:hover { background: rgba(139,202,139,0.2); color: #8bca8b; }
-        .post-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 8px; }
-        .post-actions button { background: none; border: none; color: rgba(255,255,255,0.5); cursor: pointer; font-size: 12px; padding: 4px 8px; border-radius: 12px; }
-        .post-actions button:hover { background: rgba(139,202,139,0.2); color: #8bca8b; }
         .new-comment { display: flex; gap: 10px; margin-top: 12px; }
         .new-comment input { flex: 1; padding: 10px 14px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: white; font-size: 13px; outline: none; transition: all 0.3s; }
         .new-comment input:focus { border-color: #8bca8b; background: rgba(255,255,255,0.1); }
+        
+        .post-actions, .comment-actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 8px; }
+        .post-actions button, .comment-actions button { background: none; border: none; color: rgba(255,255,255,0.5); cursor: pointer; font-size: 12px; padding: 4px 8px; border-radius: 12px; transition: all 0.2s; }
+        .post-actions button:hover, .comment-actions button:hover { background: rgba(139,202,139,0.2); color: #8bca8b; }
         
         .psychologists-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
         .psychologist-card { padding: 20px; text-align: center; cursor: pointer; transition: all 0.3s; }
@@ -162,7 +160,9 @@
         .chat-input .btn-primary { padding: 8px 16px; font-size: 13px; }
         
         .dashboard-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 25px; justify-content: center; }
-        .dashboard-tabs button { padding: 8px 20px; border-radius: 40px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.3s; }
+        .dashboard-tabs button { padding: 10px 18px; border-radius: 40px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.3s; background: rgba(255,255,255,0.1); border: none; color: white; }
+        .dashboard-tabs button.btn-primary { background: linear-gradient(135deg, #8bca8b, #5a9e5a); }
+        
         .appointments-grid, .notifications-list { display: flex; flex-direction: column; gap: 12px; max-width: 650px; margin: 0 auto; }
         .appointment-card, .notification-item { padding: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
         
@@ -188,7 +188,7 @@
         
         .certificates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-top: 12px; }
         .certificate-card { background: rgba(255,255,255,0.05); border-radius: 14px; padding: 10px; text-align: center; }
-        .certificate-card img { width: 100%; height: 100px; object-fit: cover; border-radius: 10px; margin-bottom: 6px; }
+        .certificate-card img { width: 100%; height: 100px; object-fit: cover; border-radius: 10px; margin-bottom: 6px; background: #2a2a2a; }
         .certificate-card .cert-title { font-size: 12px; font-weight: 500; }
         .certificate-card .cert-desc { font-size: 10px; opacity: 0.6; margin-top: 3px; }
         .achievements-list { margin-top: 12px; }
@@ -204,13 +204,15 @@
             .stats-grid { grid-template-columns: 1fr; gap: 10px; }
             .nav-links { display: none; }
             .dashboard-tabs { gap: 6px; }
-            .dashboard-tabs button { padding: 5px 12px; font-size: 11px; }
+            .dashboard-tabs button { padding: 8px 14px; font-size: 12px; }
             .post-card { padding: 14px; }
             .post-avatar { width: 38px; height: 38px; }
             .post-author { font-size: 13px; }
             .psychologist-card { padding: 14px; }
             .calendar-day { font-size: 11px; }
+            .btn-login, .btn-register-nav { padding: 6px 14px; font-size: 12px; }
             
+            /* Чат на мобильных */
             .chat-container { flex-direction: column; gap: 12px; }
             .chat-users { width: 100%; max-height: 180px; overflow-y: auto; margin-bottom: 0; border-radius: 18px; }
             .chat-users h4 { font-size: 13px; margin-bottom: 8px; }
@@ -233,7 +235,7 @@
             .hero h1 { font-size: 24px; }
             .section-header h2 { font-size: 22px; }
             .btn-primary, .btn-secondary { padding: 8px 18px; font-size: 13px; }
-            .dashboard-tabs button { padding: 4px 10px; font-size: 10px; }
+            .dashboard-tabs button { padding: 6px 10px; font-size: 10px; }
             .appointment-card { flex-direction: column; text-align: center; }
             .calendar-day { font-size: 10px; }
             .chat-messages { height: 340px; }
@@ -275,6 +277,24 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
+        // -------------------- ЗВУК (Web Audio короткий "бип") --------------------
+        let audioCtx = null;
+        function playBeep() {
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                oscillator.frequency.value = 800;
+                gainNode.gain.value = 0.2;
+                oscillator.start();
+                gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.5);
+                oscillator.stop(audioCtx.currentTime + 0.5);
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+            } catch(e) { console.log('Audio not supported'); }
+        }
+
         let currentUser = null;
         let currentTab = 'feed';
         let currentCalendarDate = new Date();
@@ -284,14 +304,8 @@
         let profileEditMode = false;
         let allPsychologists = [];
 
-        // ---- Вспомогательные функции ----
         function showToast(message, isError = false, withSound = false) {
-            if (withSound) {
-                try {
-                    const audio = new Audio('data:audio/wav;base64,U3RlYWx0aCBzb3VuZA==');
-                    audio.play().catch(e => console.log('Audio play failed', e));
-                } catch(e) {}
-            }
+            if (withSound) playBeep();
             const toast = document.createElement('div');
             toast.className = `toast ${isError ? 'error' : ''}`;
             toast.textContent = message;
@@ -319,65 +333,11 @@
             });
         }
 
-        // ---- WebSocket и автообновление ----
-        function initSocket() {
-            if (!socket) {
-                socket = io();
-                socket.on('connect', () => {
-                    if (currentUser) socket.emit('register_user', currentUser.id);
-                });
-                // События для ленты
-                socket.on('post_created', () => { if (currentTab === 'feed') renderFeed(); });
-                socket.on('post_updated', () => { if (currentTab === 'feed') renderFeed(); });
-                socket.on('post_deleted', () => { if (currentTab === 'feed') renderFeed(); });
-                socket.on('comment_created', () => { if (currentTab === 'feed') renderFeed(); });
-                socket.on('comment_updated', () => { if (currentTab === 'feed') renderFeed(); });
-                socket.on('comment_deleted', () => { if (currentTab === 'feed') renderFeed(); });
-                socket.on('post_liked', () => { if (currentTab === 'feed') renderFeed(); });
-                // События для записей и уведомлений
-                socket.on('appointment_created', () => {
-                    if (currentTab === 'appointments' || currentTab === 'overview') refreshUser().then(() => renderDashboard());
-                    showToast('Новая заявка на запись!', false, true);
-                });
-                socket.on('appointment_updated', () => {
-                    if (currentTab === 'appointments' || currentTab === 'overview') refreshUser().then(() => renderDashboard());
-                });
-                socket.on('notification', (notif) => {
-                    refreshUser().then(() => {
-                        if (currentTab === 'notifications') renderDashboard();
-                        showToast(notif.title + ': ' + notif.message, false, true);
-                    });
-                });
-                // Событие для чата
-                socket.on('new_message', async (msg) => {
-                    if (currentTab === 'chat') {
-                        if (chatPartner && (msg.from === chatPartner.id || msg.to === chatPartner.id)) {
-                            await markMessagesAsRead(chatPartner.id);
-                            if (window.innerWidth <= 768) {
-                                if (typeof loadMessagesMobile === 'function') await loadMessagesMobile();
-                            } else {
-                                if (typeof loadMessagesDesktop === 'function') await loadMessagesDesktop();
-                            }
-                        } else {
-                            const container = document.getElementById('dashboardContent');
-                            if (container) await initChat(container);
-                        }
-                    }
-                    showToast(`Новое сообщение`, false, true);
-                });
-            }
-        }
-
-        async function refreshUser() {
-            if (!currentUser) return;
-            const res = await fetch(`/api/user/${currentUser.id}`);
-            const data = await res.json();
-            if (data.success) currentUser = data.user;
-        }
-
-        // ---- Лента новостей с кнопками редактирования/удаления ----
+        function showMainFeed() { renderFeed(); }
+        
+        // -------------------- ЛЕНТА С РЕДАКТИРОВАНИЕМ --------------------
         async function renderFeed() {
-            const data = await fetchJSON('/api/posts');
+            const data = await fetchJSON(`/api/posts?userId=${currentUser?.id || ''}`);
             if (!data.success) return;
             const posts = data.posts;
             const html = `
@@ -455,6 +415,7 @@
                     isLoading = false;
                 };
             });
+            
             // Обработчики раскрытия комментариев
             document.querySelectorAll('.comment-toggle').forEach(btn => {
                 btn.onclick = () => {
@@ -469,7 +430,8 @@
                     }
                 };
             });
-            // Обработчики редактирования поста
+            
+            // Редактирование поста
             document.querySelectorAll('.edit-post-btn').forEach(btn => {
                 btn.onclick = async (e) => {
                     e.stopPropagation();
@@ -489,7 +451,8 @@
                     }
                 };
             });
-            // Обработчики удаления поста
+            
+            // Удаление поста
             document.querySelectorAll('.delete-post-btn').forEach(btn => {
                 btn.onclick = async (e) => {
                     e.stopPropagation();
@@ -504,7 +467,8 @@
                     }
                 };
             });
-            // Обработчики редактирования комментария
+            
+            // Редактирование комментария
             document.querySelectorAll('.edit-comment-btn').forEach(btn => {
                 btn.onclick = async (e) => {
                     e.stopPropagation();
@@ -521,7 +485,8 @@
                     }
                 };
             });
-            // Обработчики удаления комментария
+            
+            // Удаление комментария
             document.querySelectorAll('.delete-comment-btn').forEach(btn => {
                 btn.onclick = async (e) => {
                     e.stopPropagation();
@@ -559,7 +524,7 @@
             isLoading = false;
         }
 
-        // ---- Психологи, профиль, запись, календарь (оригинальный код без изменений) ----
+        // -------------------- ПСИХОЛОГИ --------------------
         async function showPsychologistsList() {
             const data = await fetchJSON('/api/psychologists');
             allPsychologists = data.psychologists;
@@ -623,7 +588,7 @@
                             <div class="certificates-grid">
                                 ${(p.certificates || []).map(c => `
                                     <div class="certificate-card">
-                                        <img src="${c.image}">
+                                        <img src="${c.image}" onerror="this.src='https://placehold.co/200x100?text=Ошибка+загрузки'">
                                         <div class="cert-title">${escapeHtml(c.title)}</div>
                                         <div class="cert-desc">${escapeHtml(c.description)}</div>
                                     </div>
@@ -728,6 +693,7 @@
             isLoading = false;
         }
 
+        // -------------------- DASHBOARD --------------------
         function showDashboard() { currentTab = 'overview'; renderDashboard(); }
         
         async function renderDashboard() {
@@ -837,7 +803,7 @@
                         <div class="certificates-grid" id="certificatesGrid">
                             ${(currentUser.certificates || []).map(c => `
                                 <div class="certificate-card">
-                                    <img src="${c.image}">
+                                    <img src="${c.image}" onerror="this.src='https://placehold.co/200x100?text=Ошибка+загрузки'">
                                     <div class="cert-title">${escapeHtml(c.title)}</div>
                                     <div class="cert-desc">${escapeHtml(c.description)}</div>
                                     <button class="btn-secondary" style="margin-top: 6px; padding: 4px 8px; font-size:10px;" onclick="deleteCertificate('${c.id}')">Удалить</button>
@@ -1224,7 +1190,7 @@
             };
         }
 
-        // ========== ЧАТ (полностью из вашего исходного кода, без изменений) ==========
+        // -------------------- ЧАТ (полная версия) --------------------
         async function initChat(container) {
             const data = await fetchJSON(`/api/messages/${currentUser.id}`);
             const users = data.users || [];
@@ -1288,93 +1254,6 @@
                         </div>
                     </div>
                 `;
-                
-                // Добавляем стили для мобильной версии
-                const style = document.createElement('style');
-                style.textContent = `
-                    .mobile-chat-wrapper {
-                        display: flex;
-                        flex-direction: column;
-                        height: 100%;
-                        min-height: 500px;
-                    }
-                    .contacts-view, .chat-view {
-                        flex: 1;
-                        display: flex;
-                        flex-direction: column;
-                        overflow: hidden;
-                    }
-                    .chat-users-list {
-                        overflow-y: auto;
-                        flex: 1;
-                    }
-                    .chat-header {
-                        display: flex;
-                        align-items: center;
-                        gap: 12px;
-                        padding: 10px 12px;
-                        background: rgba(30,35,32,0.6);
-                        backdrop-filter: blur(10px);
-                        border-bottom: 1px solid rgba(255,255,255,0.1);
-                        margin-bottom: 8px;
-                    }
-                    .chat-partner-name {
-                        font-weight: 600;
-                        font-size: 16px;
-                    }
-                    .chat-messages {
-                        flex: 1;
-                        display: flex;
-                        flex-direction: column;
-                        overflow: hidden;
-                        background: rgba(30,35,32,0.4);
-                        border-radius: 20px;
-                    }
-                    .messages-list {
-                        flex: 1;
-                        overflow-y: auto;
-                        padding: 12px;
-                        display: flex;
-                        flex-direction: column;
-                        gap: 8px;
-                    }
-                    .chat-input {
-                        display: flex;
-                        gap: 8px;
-                        padding: 10px;
-                        border-top: 1px solid rgba(255,255,255,0.1);
-                        align-items: center;
-                        flex-wrap: wrap;
-                        background: rgba(0,0,0,0.3);
-                    }
-                    .chat-controls {
-                        display: flex;
-                        gap: 6px;
-                    }
-                    .chat-controls button {
-                        background: rgba(255,255,255,0.1);
-                        border: none;
-                        width: 34px;
-                        height: 34px;
-                        border-radius: 50%;
-                        cursor: pointer;
-                        color: white;
-                    }
-                    .chat-input input {
-                        flex: 1;
-                        padding: 8px 12px;
-                        border-radius: 30px;
-                        border: 1px solid rgba(255,255,255,0.1);
-                        background: rgba(255,255,255,0.05);
-                        color: white;
-                        font-size: 13px;
-                    }
-                    .recording-active {
-                        background: #ff4444 !important;
-                        animation: pulse 1s infinite;
-                    }
-                `;
-                document.head.appendChild(style);
                 
                 // Элементы управления
                 const contactsView = document.getElementById('contactsView');
@@ -1471,7 +1350,7 @@
                     if (msgInput) msgInput.value = '';
                 };
                 
-                // Инициализация аудио/фото (та же логика, что и в десктопе)
+                // Инициализация аудио/фото
                 let mediaRecorder = null;
                 let audioChunks = [];
                 let isRecording = false;
@@ -1571,11 +1450,8 @@
                     }
                 };
                 
-                // Обработка сокета для новых сообщений (уже есть глобальный, но добавим локальный для обновления)
-                // Используем уже объявленный socket.on('new_message') в initSocket, поэтому здесь не дублируем.
-                
             } else {
-                // Десктопная версия (оставляем оригинальный код)
+                // Десктопная версия
                 container.innerHTML = `
                     <div class="chat-container">
                         <div class="chat-users">
@@ -1699,7 +1575,59 @@
                     });
                 }
                 
-                // Сокет уже обрабатывается глобально, но здесь нужны обработчики для десктопа
+                if (!socket) {
+                    socket = io();
+                    socket.on('new_message', async (msg) => {
+                        if (msg.to === currentUser.id) {
+                            const refreshRes = await fetchJSON(`/api/messages/${currentUser.id}`);
+                            const newAllMessages = refreshRes.messages || [];
+                            const newUnreadMap = {};
+                            newAllMessages.forEach(m => {
+                                if (m.to === currentUser.id && !m.isRead) {
+                                    newUnreadMap[m.from] = (newUnreadMap[m.from] || 0) + 1;
+                                }
+                            });
+                            
+                            const userDiv = document.querySelector(`.chat-user[data-id="${msg.from}"]`);
+                            if (userDiv) {
+                                const currentUnread = newUnreadMap[msg.from] || 0;
+                                let badge = userDiv.querySelector('.unread-badge');
+                                if (badge) badge.textContent = currentUnread;
+                                else if (currentUnread > 0) {
+                                    badge = document.createElement('div');
+                                    badge.className = 'unread-badge';
+                                    badge.textContent = currentUnread;
+                                    userDiv.appendChild(badge);
+                                }
+                                let redDot = userDiv.querySelector('.red-dot');
+                                if (currentUnread > 0 && !redDot) {
+                                    redDot = document.createElement('div');
+                                    redDot.className = 'red-dot';
+                                    userDiv.appendChild(redDot);
+                                } else if (currentUnread === 0 && redDot) redDot.remove();
+                                
+                                const totalBadge = document.getElementById('totalUnreadBadge');
+                                const newTotalUnread = Object.values(newUnreadMap).reduce((a, b) => a + b, 0);
+                                if (totalBadge) totalBadge.textContent = newTotalUnread > 0 ? newTotalUnread : '';
+                            }
+                            showToast(`Новое сообщение`, false, true);
+                        }
+                        if (chatPartner && (msg.from === chatPartner.id || msg.to === chatPartner.id)) {
+                            if (msg.from === chatPartner.id) {
+                                await markMessagesAsRead(chatPartner.id);
+                                const userDiv = document.querySelector(`.chat-user[data-id="${chatPartner.id}"]`);
+                                if (userDiv) {
+                                    const badge = userDiv.querySelector('.unread-badge');
+                                    if (badge) badge.remove();
+                                    const redDot = userDiv.querySelector('.red-dot');
+                                    if (redDot) redDot.remove();
+                                }
+                            }
+                            await loadMessagesDesktop();
+                        }
+                    });
+                }
+                
                 document.querySelectorAll('.chat-user').forEach(el => {
                     el.onclick = async () => {
                         const id = el.dataset.id;
@@ -1770,6 +1698,62 @@
                     }
                 }
             }
+        }
+
+        // -------------------- WEBSOCKET --------------------
+        function initSocket() {
+            if (!socket) {
+                socket = io();
+                socket.on('connect', () => {
+                    if (currentUser) socket.emit('register_user', currentUser.id);
+                });
+                socket.on('post_created', () => { if (currentTab === 'feed') renderFeed(); });
+                socket.on('post_updated', () => { if (currentTab === 'feed') renderFeed(); });
+                socket.on('post_deleted', () => { if (currentTab === 'feed') renderFeed(); });
+                socket.on('comment_created', () => { if (currentTab === 'feed') renderFeed(); });
+                socket.on('comment_updated', () => { if (currentTab === 'feed') renderFeed(); });
+                socket.on('comment_deleted', () => { if (currentTab === 'feed') renderFeed(); });
+                socket.on('post_liked', () => { if (currentTab === 'feed') renderFeed(); });
+                socket.on('appointment_created', () => {
+                    if (currentTab === 'appointments' || currentTab === 'overview') refreshUser().then(() => renderDashboard());
+                    showToast('Новая заявка на запись!', false, true);
+                });
+                socket.on('appointment_updated', () => {
+                    if (currentTab === 'appointments' || currentTab === 'overview') refreshUser().then(() => renderDashboard());
+                });
+                socket.on('notification', (notif) => {
+                    refreshUser().then(() => {
+                        if (currentTab === 'notifications') renderDashboard();
+                        showToast(notif.title + ': ' + notif.message, false, true);
+                    });
+                });
+                socket.on('new_message', async (msg) => {
+                    if (currentTab === 'chat') {
+                        if (chatPartner && (msg.from === chatPartner.id || msg.to === chatPartner.id)) {
+                            await fetch('/api/messages/read', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ userId: currentUser.id, fromUserId: msg.from })
+                            });
+                            if (window.innerWidth <= 768) {
+                                if (typeof loadMessagesMobile !== 'undefined') await loadMessagesMobile();
+                            } else {
+                                if (typeof loadMessagesDesktop !== 'undefined') await loadMessagesDesktop();
+                            }
+                        } else {
+                            const container = document.getElementById('dashboardContent');
+                            if (container) await initChat(container);
+                        }
+                    }
+                    showToast(`Новое сообщение`, false, true);
+                });
+            }
+        }
+
+        async function refreshUser() {
+            const res = await fetch(`/api/user/${currentUser.id}`);
+            const data = await res.json();
+            if (data.success) currentUser = data.user;
         }
 
         async function confirmAppointment(appId, clientId) {
@@ -1938,9 +1922,7 @@
             location.reload(); 
         }
 
-        function showMainFeed() { renderFeed(); }
-
-        // ---- Инициализация ----
+        // -------------------- ИНИЦИАЛИЗАЦИЯ --------------------
         async function init() {
             const userId = localStorage.getItem('userId');
             if (userId) {

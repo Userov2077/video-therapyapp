@@ -26,10 +26,12 @@ const storage = multer.diskStorage({
         else if (file.fieldname === 'image') cb(null, 'public/uploads/images/');
         else if (file.fieldname === 'voice') cb(null, 'public/uploads/audio/');
         else if (file.fieldname === 'recording') cb(null, 'public/uploads/recordings/');
+        else if (file.fieldname === 'certificate') cb(null, 'public/uploads/images/');
         else cb(null, 'public/uploads/');
     },
     filename: (req, file, cb) => {
-        cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname));
+        const unique = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, unique + path.extname(file.originalname));
     }
 });
 
@@ -48,7 +50,7 @@ files.forEach(f => {
 function saveData() { files.forEach(f => fs.writeFileSync(`${dataPath}${f}.json`, JSON.stringify(data[f], null, 2))); }
 const getUser = id => data.users.find(u => u.id === id);
 
-// API Регистрация
+// ---- Регистрация и авторизация ----
 app.post('/api/register', (req, res) => {
     const { fullName, email, phone, password, role, specialization, experience, about } = req.body;
     if (data.users.find(u => u.email === email)) return res.json({ success: false, error: 'Email уже используется' });
@@ -125,6 +127,7 @@ app.put('/api/schedule', (req, res) => {
     res.json({ success: true });
 });
 
+// ---- Загрузка файлов ----
 app.post('/api/upload-avatar', upload.single('avatar'), (req, res) => {
     if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
     res.json({ success: true, avatarUrl: `/uploads/images/${req.file.filename}` });
@@ -155,19 +158,23 @@ app.post('/api/upload-recording', upload.single('recording'), (req, res) => {
     res.json({ success: true, recordingUrl: recording.url });
 });
 
-app.post('/api/upload', upload.single('file'), (req, res) => {
-    if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
-    res.json({ success: true, fileUrl: `/uploads/images/${req.file.filename}` });
-});
-
+// ---- Сертификаты и достижения ----
 app.post('/api/certificate', upload.single('file'), (req, res) => {
     const { userId, title, description } = req.body;
     const user = getUser(userId);
-    if (!user || user.role !== 'psychologist') return res.json({ success: false });
+    if (!user || user.role !== 'psychologist') return res.json({ success: false, error: 'Нет прав' });
     if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
-    user.certificates.push({ id: Date.now().toString(), title: title || 'Сертификат', description: description || '', image: `/uploads/images/${req.file.filename}`, createdAt: new Date().toISOString() });
+    
+    const cert = {
+        id: Date.now().toString(),
+        title: title || 'Сертификат',
+        description: description || '',
+        image: `/uploads/images/${req.file.filename}`,
+        createdAt: new Date().toISOString()
+    };
+    user.certificates.push(cert);
     saveData();
-    res.json({ success: true });
+    res.json({ success: true, certificate: cert });
 });
 
 app.delete('/api/certificate/:userId/:certId', (req, res) => {
@@ -195,17 +202,21 @@ app.delete('/api/achievement/:userId/:achievementId', (req, res) => {
     res.json({ success: true });
 });
 
-// ----- ПОСТЫ -----
+// ---- Посты ----
 app.get('/api/posts', (req, res) => {
     const posts = [...data.posts].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
     const enriched = posts.map(post => {
         const author = getUser(post.authorId);
+        const likesCount = data.likes.filter(l => l.postId === post.id).length;
+        const comments = data.comments.filter(c => c.postId === post.id).map(c => ({ ...c, author: getUser(c.authorId) }));
+        const userLiked = req.query.userId ? data.likes.some(l => l.postId === post.id && l.userId === req.query.userId) : false;
         return { 
             ...post, 
-            author: { id: author.id, fullName: author.fullName, avatar: author.avatar }, 
-            likesCount: data.likes.filter(l => l.postId === post.id).length,
-            commentsCount: data.comments.filter(c => c.postId === post.id).length,
-            comments: data.comments.filter(c => c.postId === post.id).map(c => ({ ...c, author: getUser(c.authorId) }))
+            author: { id: author.id, fullName: author.fullName, avatar: author.avatar },
+            likesCount,
+            commentsCount: comments.length,
+            comments,
+            userLiked
         };
     });
     res.json({ success: true, posts: enriched });
@@ -224,7 +235,6 @@ app.post('/api/posts', upload.single('image'), (req, res) => {
     };
     data.posts.push(newPost);
     saveData();
-    // Отправляем событие всем подключённым клиентам
     io.emit('post_created', newPost);
     res.json({ success: true });
 });
@@ -256,7 +266,7 @@ app.delete('/api/posts/:id', (req, res) => {
     res.json({ success: true });
 });
 
-// ----- КОММЕНТАРИИ -----
+// ---- Комментарии ----
 app.post('/api/posts/:id/comment', (req, res) => {
     const { userId, text } = req.body;
     const postId = req.params.id;
@@ -305,22 +315,20 @@ app.post('/api/posts/:id/like', (req, res) => {
     const existing = data.likes.find(l => l.postId === postId && l.userId === userId);
     if (existing) {
         data.likes = data.likes.filter(l => l !== existing);
-        const post = data.posts.find(p => p.id === postId);
-        if (post) post.likesCount--;
+        const likesCount = data.likes.filter(l => l.postId === postId).length;
         saveData();
-        io.emit('post_liked', { postId, likesCount: data.likes.filter(l => l.postId === postId).length, userId, liked: false });
-        res.json({ success: true, liked: false, likesCount: data.likes.filter(l => l.postId === postId).length });
+        io.emit('post_liked', { postId, likesCount, userId, liked: false });
+        res.json({ success: true, liked: false, likesCount });
     } else {
         data.likes.push({ id: Date.now().toString(), postId, userId, createdAt: new Date().toISOString() });
-        const post = data.posts.find(p => p.id === postId);
-        if (post) post.likesCount++;
+        const likesCount = data.likes.filter(l => l.postId === postId).length;
         saveData();
-        io.emit('post_liked', { postId, likesCount: data.likes.filter(l => l.postId === postId).length, userId, liked: true });
-        res.json({ success: true, liked: true, likesCount: data.likes.filter(l => l.postId === postId).length });
+        io.emit('post_liked', { postId, likesCount, userId, liked: true });
+        res.json({ success: true, liked: true, likesCount });
     }
 });
 
-// ----- ЗАПИСИ НА ПРИЁМ -----
+// ---- Записи на приём ----
 app.post('/api/appointment', (req, res) => {
     const { clientId, psychologistId, date, time } = req.body;
     const client = getUser(clientId);
@@ -341,7 +349,6 @@ app.post('/api/appointment', (req, res) => {
     const notification = { id: Date.now().toString(), type: 'new_appointment', title: 'Новая заявка', message: `${client.fullName} хочет записаться на ${date} в ${time}`, appointmentId: appointment.id, roomId, read: false, createdAt: new Date().toISOString() };
     psychologist.notifications.unshift(notification);
     saveData();
-    // Отправляем уведомление психологу в реальном времени
     io.to(psychologistId).emit('notification', notification);
     io.to(psychologistId).emit('appointment_created', appointment);
     res.json({ success: true });
@@ -365,7 +372,7 @@ app.post('/api/appointment/confirm', (req, res) => {
     res.json({ success: true });
 });
 
-// ----- ЧАТ -----
+// ---- Чат ----
 app.get('/api/messages/:userId', (req, res) => {
     const userId = req.params.userId;
     const user = getUser(userId);
@@ -396,10 +403,9 @@ app.get('/api/psychologists', (req, res) => {
     res.json({ success: true, psychologists: data.users.filter(u => u.role === 'psychologist').map(({ password, ...u }) => u) });
 });
 
-// ----- WEBSOCKET комнаты -----
+// ---- WebRTC комнаты ----
 const activeRooms = new Map();
 io.on('connection', (socket) => {
-    // Присоединяем пользователя к его личной комнате для уведомлений
     socket.on('register_user', (userId) => {
         socket.userId = userId;
         if (userId) socket.join(userId);
