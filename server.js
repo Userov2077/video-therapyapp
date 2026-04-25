@@ -169,8 +169,7 @@ app.post('/api/upload-recording', upload.single('recording'), (req, res) => {
     res.json({ success: true, recordingUrl: recording.url });
 });
 
-// ---- СЕРТИФИКАТЫ (ИСПРАВЛЕННАЯ ВЕРСИЯ) ----
-// ---- СЕРТИФИКАТЫ (исправленная версия 2) ----
+// ---- СЕРТИФИКАТЫ ----
 app.post('/api/certificates', upload.single('certificate'), (req, res) => {
     try {
         const { userId, title } = req.body;
@@ -194,8 +193,6 @@ app.post('/api/certificates', upload.single('certificate'), (req, res) => {
         user.certificates.push(newCert);
         
         saveData();
-        
-        // Возвращаем обновлённого пользователя целиком, чтобы клиент мог сразу обновить currentUser
         const { password, ...safeUser } = user;
         res.json({ success: true, certificate: newCert, user: safeUser });
     } catch (err) {
@@ -216,13 +213,13 @@ app.delete('/api/certificates/:userId/:certId', (req, res) => {
         }
         
         saveData();
-        
         const { password, ...safeUser } = user;
         res.json({ success: true, user: safeUser });
     } catch (err) {
         res.json({ success: false, error: err.message });
     }
 });
+
 // ---- Посты ----
 app.get('/api/posts', (req, res) => {
     const posts = [...globalData.posts].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -389,9 +386,12 @@ app.post('/api/appointment', (req, res) => {
     const roomId = Math.random().toString(36).substring(2, 10).toUpperCase();
     const appointment = { id: Date.now().toString(), psychologistId, psychologistName: psychologist.fullName, clientId, clientName: client.fullName, date, time, roomId, status: 'pending', createdAt: new Date().toISOString() };
     globalData.appointments.push(appointment);
+    if (!client.appointments) client.appointments = [];
     client.appointments.push(appointment);
+    if (!psychologist.clients) psychologist.clients = [];
     psychologist.clients.push({ clientId, clientName: client.fullName, appointmentId: appointment.id, date, time, status: 'pending', roomId });
     const notification = { id: Date.now().toString(), type: 'new_appointment', title: 'Новая заявка', message: `${client.fullName} хочет записаться на ${date} в ${time}`, appointmentId: appointment.id, roomId, read: false, createdAt: new Date().toISOString() };
+    if (!psychologist.notifications) psychologist.notifications = [];
     psychologist.notifications.unshift(notification);
     saveData();
     io.to(psychologistId).emit('notification', notification);
@@ -406,9 +406,16 @@ app.post('/api/appointment/confirm', (req, res) => {
     appointment.status = 'confirmed';
     const psychologist = getUser(psychologistId);
     const client = getUser(clientId);
-    if (psychologist) { const c = psychologist.clients.find(c => c.appointmentId === appointmentId); if (c) c.status = 'confirmed'; }
-    if (client) { const a = client.appointments.find(a => a.id === appointmentId); if (a) a.status = 'confirmed'; }
+    if (psychologist && psychologist.clients) {
+        const c = psychologist.clients.find(c => c.appointmentId === appointmentId);
+        if (c) c.status = 'confirmed';
+    }
+    if (client && client.appointments) {
+        const a = client.appointments.find(a => a.id === appointmentId);
+        if (a) a.status = 'confirmed';
+    }
     const notification = { id: Date.now().toString(), type: 'appointment_confirmed', title: 'Запись подтверждена!', message: `${psychologist.fullName} подтвердил запись на ${appointment.date} в ${appointment.time}`, appointmentId, roomId: appointment.roomId, read: false, createdAt: new Date().toISOString() };
+    if (!client.notifications) client.notifications = [];
     client.notifications.unshift(notification);
     saveData();
     io.to(clientId).emit('notification', notification);
@@ -553,7 +560,7 @@ app.post('/api/subscriptions', (req, res) => {
     }
 });
 
-// ---- Чат ----
+// ---- Чат (с поддержкой непрочитанных и уведомлений) ----
 app.get('/api/messages/:userId', (req, res) => {
     const userId = req.params.userId;
     const user = getUser(userId);
@@ -569,14 +576,23 @@ app.post('/api/messages', (req, res) => {
     const newMsg = { id: Date.now().toString(), from, to, text: text || '', image: image || null, voice: voice || null, createdAt: new Date().toISOString(), isRead: false };
     globalData.messages.push(newMsg);
     saveData();
+    // Отправляем получателю в реальном времени
     io.to(to).emit('new_message', newMsg);
+    // Также отправляем отправителю (чтобы обновить его список чатов)
+    io.to(from).emit('new_message', newMsg);
     res.json({ success: true });
 });
 
 app.post('/api/messages/read', (req, res) => {
     const { userId, fromUserId } = req.body;
-    globalData.messages.filter(m => m.to === userId && m.from === fromUserId && !m.isRead).forEach(m => m.isRead = true);
-    saveData();
+    let updated = false;
+    globalData.messages.forEach(msg => {
+        if (msg.to === userId && msg.from === fromUserId && !msg.isRead) {
+            msg.isRead = true;
+            updated = true;
+        }
+    });
+    if (updated) saveData();
     res.json({ success: true });
 });
 
