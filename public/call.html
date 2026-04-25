@@ -23,7 +23,6 @@
             height: 100%;
             background: #000;
         }
-        /* Большое видео (собеседник) */
         .remote-video-wrapper {
             position: absolute;
             inset: 0;
@@ -39,7 +38,6 @@
             height: 100%;
             object-fit: cover;
         }
-        /* Маленькое плавающее видео (своё) */
         .local-video-wrapper {
             position: absolute;
             bottom: 20px;
@@ -64,7 +62,6 @@
             height: 100%;
             object-fit: cover;
         }
-        /* Элементы управления */
         .controls {
             position: absolute;
             bottom: 30px;
@@ -97,12 +94,11 @@
         }
         .end-call { background: rgba(220,38,38,0.8); }
         .end-call:hover { background: #dc2626; }
+        .reconnect-btn { background: #f59e0b; }
+        .reconnect-btn:hover { background: #f59e0b; opacity:0.9; }
         .recording-active { background: #dc2626 !important; animation: pulse 1s infinite; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
-        .chat-toggle-btn {
-            background: rgba(139,202,139,0.3);
-        }
-        /* Панель чата (выдвижная) */
+        .chat-toggle-btn { background: rgba(139,202,139,0.3); }
         .chat-panel {
             position: absolute;
             bottom: 100px;
@@ -121,9 +117,7 @@
             z-index: 25;
             box-shadow: 0 8px 24px rgba(0,0,0,0.3);
         }
-        .chat-panel.open {
-            transform: translateX(0);
-        }
+        .chat-panel.open { transform: translateX(0); }
         .chat-header {
             padding: 14px 16px;
             background: rgba(0,0,0,0.5);
@@ -203,6 +197,19 @@
             font-family: monospace;
             color: #8bca8b;
         }
+        .room-info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(10px);
+            padding: 6px 12px;
+            border-radius: 30px;
+            font-size: 12px;
+            z-index: 15;
+            font-family: monospace;
+            color: #8bca8b;
+        }
         .waiting-message {
             position: absolute;
             top: 50%;
@@ -251,13 +258,14 @@
         <button id="toggleMic" class="control-btn" title="Микрофон"><i class="fas fa-microphone"></i></button>
         <button id="toggleCam" class="control-btn" title="Камера"><i class="fas fa-video"></i></button>
         <button id="recordBtn" class="control-btn" title="Запись"><i class="fas fa-circle"></i></button>
+        <button id="reconnectBtn" class="control-btn reconnect-btn" title="Переподключиться"><i class="fas fa-sync-alt"></i></button>
         <button id="chatToggleBtn" class="control-btn chat-toggle-btn" title="Чат"><i class="fas fa-comment"></i></button>
         <button id="endCallBtn" class="control-btn end-call" title="Завершить"><i class="fas fa-phone-slash"></i></button>
     </div>
 
     <div id="connectionStatus" class="connection-status">📡 Подключение...</div>
+    <div id="roomInfo" class="room-info">🔑 Комната: <span id="roomIdSpan"></span></div>
 
-    <!-- Выдвижная панель чата -->
     <div id="chatPanel" class="chat-panel">
         <div class="chat-header">
             <span><i class="fas fa-comment"></i> Чат звонка</span>
@@ -278,7 +286,7 @@
     (function(){
         const urlParams = new URLSearchParams(window.location.search);
         const roomId = urlParams.get('room');
-        let userRole = urlParams.get('role'); // 'psychologist' или 'client'
+        let userRole = urlParams.get('role');
         const currentUserId = localStorage.getItem('userId');
 
         if (!roomId || !userRole || !currentUserId) {
@@ -286,7 +294,8 @@
             window.location.href = '/';
         }
 
-        // DOM элементы
+        document.getElementById('roomIdSpan').textContent = roomId;
+
         const localVideo = document.getElementById('localVideo');
         const remoteVideo = document.getElementById('remoteVideo');
         const waitingMsg = document.getElementById('waitingMessage');
@@ -294,6 +303,7 @@
         const toggleMicBtn = document.getElementById('toggleMic');
         const toggleCamBtn = document.getElementById('toggleCam');
         const recordBtn = document.getElementById('recordBtn');
+        const reconnectBtn = document.getElementById('reconnectBtn');
         const chatToggleBtn = document.getElementById('chatToggleBtn');
         const closeChatBtn = document.getElementById('closeChatBtn');
         const endCallBtn = document.getElementById('endCallBtn');
@@ -310,7 +320,7 @@
         let isRecording = false;
         let mediaRecorder = null;
         let recordedChunks = [];
-        let isLocalLarge = false; // false = локальное маленькое, true = локальное большое
+        let isLocalLarge = false;
 
         function updateStatus(msg, isError = false) {
             statusDiv.innerHTML = `📡 ${msg}`;
@@ -396,7 +406,6 @@
                 localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 localVideo.srcObject = localStream;
                 updateStatus('Камера готова');
-                // после получения стрима, если уже есть партнёр, создаём соединение
                 if (partnerSocketId) await initWebRTC(userRole === 'psychologist');
             } catch(e) {
                 updateStatus('Нет доступа к камере/микрофону', true);
@@ -422,7 +431,6 @@
                 if (localStream) {
                     await initWebRTC(userRole === 'psychologist');
                 } else {
-                    // ждём пока localStream будет готов
                     const waitForStream = setInterval(async () => {
                         if (localStream) {
                             clearInterval(waitForStream);
@@ -466,7 +474,6 @@
             });
         }
 
-        // Отправка сообщения в чат
         function sendChatMessage() {
             const text = chatInput.value.trim();
             if (!text || !partnerSocketId) return;
@@ -475,12 +482,10 @@
             chatInput.value = '';
         }
 
-        // Переключение размера видео (клик по маленькому)
         function swapVideoSize() {
             const remoteWrapper = document.querySelector('.remote-video-wrapper');
             const localWrapper = document.querySelector('.local-video-wrapper');
             if (!isLocalLarge) {
-                // делаем локальное большим
                 remoteWrapper.style.zIndex = '1';
                 localWrapper.style.zIndex = '2';
                 localWrapper.style.width = '100%';
@@ -499,7 +504,6 @@
                 remoteWrapper.style.cursor = 'pointer';
                 isLocalLarge = true;
             } else {
-                // возвращаем как было
                 remoteWrapper.style.zIndex = '1';
                 localWrapper.style.zIndex = '10';
                 localWrapper.style.width = '120px';
@@ -520,7 +524,6 @@
             }
         }
 
-        // Запись звонка (аудио)
         async function startRecording() {
             if (!localStream) return;
             try {
@@ -568,12 +571,22 @@
             window.location.href = '/';
         }
 
-        // Инициализация
+        function reconnect() {
+            if (socket) {
+                socket.disconnect();
+                socket.connect();
+                socket.emit('register_user', currentUserId);
+                socket.emit('join-call-room', roomId, currentUserId, userRole);
+                updateStatus('Переподключение...');
+            } else {
+                setupSocket();
+            }
+        }
+
         async function init() {
             setupSocket();
             await startLocalStream();
 
-            // Обработчики UI
             toggleMicBtn.onclick = () => {
                 if (localStream) {
                     const audioTrack = localStream.getAudioTracks()[0];
@@ -592,18 +605,14 @@
                 if (isRecording) stopRecording();
                 else startRecording();
             };
+            reconnectBtn.onclick = reconnect;
             endCallBtn.onclick = endCall;
             sendChatBtn.onclick = sendChatMessage;
             chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChatMessage(); };
-            chatToggleBtn.onclick = () => {
-                chatPanel.classList.toggle('open');
-            };
-            closeChatBtn.onclick = () => {
-                chatPanel.classList.remove('open');
-            };
+            chatToggleBtn.onclick = () => { chatPanel.classList.toggle('open'); };
+            closeChatBtn.onclick = () => { chatPanel.classList.remove('open'); };
             localVideoWrapper.onclick = swapVideoSize;
 
-            // Убираем пустое сообщение при первом сообщении
             setTimeout(() => {
                 if (chatMessages.children.length === 1 && chatMessages.children[0].innerText.includes('Сообщения будут здесь')) {
                     chatMessages.innerHTML = '';

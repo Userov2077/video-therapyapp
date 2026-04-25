@@ -15,7 +15,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Создание папок
-const uploadDirs = ['public/uploads', 'public/uploads/images', 'public/uploads/audio', 'public/uploads/recordings', 'public/uploads/files', 'public/uploads/certificates'];
+const uploadDirs = ['public/uploads', 'public/uploads/images', 'public/uploads/audio', 'public/uploads/recordings', 'public/uploads/files', 'public/uploads/certificates', 'public/uploads/videos'];
 uploadDirs.forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
@@ -24,6 +24,7 @@ const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         if (file.fieldname === 'avatar') cb(null, 'public/uploads/images/');
         else if (file.fieldname === 'image') cb(null, 'public/uploads/images/');
+        else if (file.fieldname === 'video') cb(null, 'public/uploads/videos/');
         else if (file.fieldname === 'voice') cb(null, 'public/uploads/audio/');
         else if (file.fieldname === 'recording') cb(null, 'public/uploads/recordings/');
         else if (file.fieldname === 'certificate') cb(null, 'public/uploads/certificates/');
@@ -36,7 +37,7 @@ const storage = multer.diskStorage({
     }
 });
 
-const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
+const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } }); // 100MB
 
 // Загрузка данных
 const dataPath = './data/';
@@ -172,7 +173,7 @@ app.post('/api/upload-recording', upload.single('recording'), (req, res) => {
     res.json({ success: true, recordingUrl: recording.url });
 });
 
-// ---- СЕРТИФИКАТЫ ----
+// ---- Сертификаты ----
 app.post('/api/certificates', upload.single('certificate'), (req, res) => {
     try {
         const { userId, title } = req.body;
@@ -196,9 +197,11 @@ app.post('/api/certificates', upload.single('certificate'), (req, res) => {
         user.certificates.push(newCert);
         
         saveData();
+        
         const { password, ...safeUser } = user;
         res.json({ success: true, certificate: newCert, user: safeUser });
     } catch (err) {
+        console.error('Ошибка добавления сертификата:', err);
         res.json({ success: false, error: 'Ошибка сервера' });
     }
 });
@@ -207,11 +210,15 @@ app.delete('/api/certificates/:userId/:certId', (req, res) => {
     try {
         const user = getUser(req.params.userId);
         if (!user) return res.json({ success: false, error: 'Пользователь не найден' });
+        
         globalData.certificates = (globalData.certificates || []).filter(c => c.id !== req.params.certId);
+        
         if (user.certificates) {
             user.certificates = user.certificates.filter(c => c.id !== req.params.certId);
         }
+        
         saveData();
+        
         const { password, ...safeUser } = user;
         res.json({ success: true, user: safeUser });
     } catch (err) {
@@ -219,7 +226,27 @@ app.delete('/api/certificates/:userId/:certId', (req, res) => {
     }
 });
 
-// ---- Посты ----
+// ---- Посты (с видео) ----
+app.post('/api/posts', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }]), (req, res) => {
+    const { authorId, text } = req.body;
+    const author = getUser(authorId);
+    if (!author || author.role !== 'psychologist') return res.json({ success: false, error: 'Только психологи могут создавать посты' });
+    const imageFile = req.files?.image?.[0];
+    const videoFile = req.files?.video?.[0];
+    const newPost = {
+        id: Date.now().toString(),
+        authorId,
+        text,
+        image: imageFile ? `/uploads/images/${imageFile.filename}` : null,
+        video: videoFile ? `/uploads/videos/${videoFile.filename}` : null,
+        createdAt: new Date().toISOString()
+    };
+    globalData.posts.push(newPost);
+    saveData();
+    io.emit('post_created', newPost);
+    res.json({ success: true, post: newPost });
+});
+
 app.get('/api/posts', (req, res) => {
     const posts = [...globalData.posts].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
     const enriched = posts.map(post => {
@@ -227,8 +254,8 @@ app.get('/api/posts', (req, res) => {
         const likesCount = globalData.likes.filter(l => l.postId === post.id).length;
         const comments = globalData.comments.filter(c => c.postId === post.id).map(c => ({ ...c, author: getUser(c.authorId) }));
         const userLiked = req.query.userId ? globalData.likes.some(l => l.postId === post.id && l.userId === req.query.userId) : false;
-        return { 
-            ...post, 
+        return {
+            ...post,
             author: { id: author.id, fullName: author.fullName, avatar: author.avatar, rating: author.rating || 0 },
             likesCount,
             commentsCount: comments.length,
@@ -237,23 +264,6 @@ app.get('/api/posts', (req, res) => {
         };
     });
     res.json({ success: true, posts: enriched });
-});
-
-app.post('/api/posts', upload.single('image'), (req, res) => {
-    const { authorId, text } = req.body;
-    const author = getUser(authorId);
-    if (!author || author.role !== 'psychologist') return res.json({ success: false, error: 'Только психологи могут создавать посты' });
-    const newPost = { 
-        id: Date.now().toString(), 
-        authorId, 
-        text, 
-        image: req.file ? `/uploads/images/${req.file.filename}` : null, 
-        createdAt: new Date().toISOString()
-    };
-    globalData.posts.push(newPost);
-    saveData();
-    io.emit('post_created', newPost);
-    res.json({ success: true });
 });
 
 app.put('/api/posts/:id', upload.single('image'), (req, res) => {
@@ -607,6 +617,7 @@ app.post('/api/messages', (req, res) => {
         saveData();
         io.to(to).emit('unread_update', { from, count: recipient.unreadCounts[from] });
     }
+    
     saveData();
     io.to(to).emit('new_message', newMsg);
     res.json({ success: true });
@@ -636,10 +647,12 @@ app.get('/api/psychologists', (req, res) => {
 const activeRooms = new Map();
 io.on('connection', (socket) => {
     console.log(`🔌 Новое подключение: ${socket.id}`);
+    
     socket.on('register_user', (userId) => {
         socket.userId = userId;
         if (userId) socket.join(userId);
     });
+
     socket.on('join-call-room', (roomId, userId, userType) => {
         try {
             if (!activeRooms.has(roomId)) activeRooms.set(roomId, { psychologist: null, client: null, users: new Map() });
@@ -662,17 +675,20 @@ io.on('connection', (socket) => {
             room.users.set(socket.id, { userId, userType });
             if (userType === 'psychologist') room.psychologist = socket.id;
             else room.client = socket.id;
+            
             socket.join(roomId);
             socket.roomId = roomId;
             socket.userId = userId;
             socket.userType = userType;
+            
             if (room.psychologist && room.client) {
                 io.to(room.psychologist).emit('call-ready', { partnerId: room.client });
                 io.to(room.client).emit('call-ready', { partnerId: room.psychologist });
             }
             socket.emit('room-joined');
-        } catch (err) { console.error(err); }
+        } catch (err) { console.error('join-call-room error:', err); }
     });
+    
     socket.on('call-message', (msgData) => {
         const room = activeRooms.get(socket.roomId);
         if (room) {
@@ -680,12 +696,34 @@ io.on('connection', (socket) => {
             if (targetId) io.to(targetId).emit('call-message', { from: socket.userId, text: msgData.text, time: new Date().toISOString() });
         }
     });
+    
     socket.on('offer', (data) => socket.to(data.target).emit('offer', { sdp: data.sdp, from: socket.id }));
     socket.on('answer', (data) => socket.to(data.target).emit('answer', { sdp: data.sdp, from: socket.id }));
     socket.on('ice-candidate', (data) => socket.to(data.target).emit('ice-candidate', { candidate: data.candidate, from: socket.id }));
+    
     socket.on('end-call', () => {
         if (socket.roomId) {
             socket.to(socket.roomId).emit('call-ended');
+            const room = activeRooms.get(socket.roomId);
+            if (room && room.users.size >= 2) {
+                const appointment = globalData.appointments.find(a => a.roomId === socket.roomId);
+                if (appointment && appointment.status === 'confirmed') {
+                    appointment.status = 'completed';
+                    const psychologist = getUser(appointment.psychologistId);
+                    const client = getUser(appointment.clientId);
+                    if (psychologist && psychologist.clients) {
+                        const c = psychologist.clients.find(c => c.appointmentId === appointment.id);
+                        if (c) c.status = 'completed';
+                    }
+                    if (client && client.appointments) {
+                        const a = client.appointments.find(a => a.id === appointment.id);
+                        if (a) a.status = 'completed';
+                    }
+                    saveData();
+                    io.to(appointment.psychologistId).emit('appointment_completed', appointment.id);
+                    io.to(appointment.clientId).emit('appointment_completed', appointment.id);
+                }
+            }
             setTimeout(() => {
                 const room = activeRooms.get(socket.roomId);
                 if (room && (!room.psychologist || !room.client)) activeRooms.delete(socket.roomId);
@@ -694,6 +732,7 @@ io.on('connection', (socket) => {
             delete socket.roomId;
         }
     });
+    
     socket.on('disconnect', () => {
         if (socket.roomId) {
             socket.to(socket.roomId).emit('partner-disconnected');

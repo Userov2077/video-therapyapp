@@ -33,11 +33,16 @@
             padding-bottom: calc(var(--bottom-h) + env(safe-area-inset-bottom));
             min-height: 100vh;
         }
-        .video-background { position: fixed; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; }
-        .video-overlay {
-            position: fixed; inset: 0; z-index: -1;
-            background: linear-gradient(180deg, rgba(0,0,0,0.72) 0%, rgba(2,8,4,0.55) 60%, rgba(0,0,0,0.8) 100%);
+        /* Фон – статичный градиент (легче для сервера) */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            z-index: -2;
+            background: radial-gradient(circle at 20% 30%, #0a1f0a, #020804);
         }
+        /* Если нужно видео-фон, раскомментировать и удалить ::before */
+        /* .video-background { position: fixed; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; } */
         .navbar {
             position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h);
             background: rgba(4,10,5,0.78); backdrop-filter: blur(28px) saturate(1.6);
@@ -124,6 +129,7 @@
         .post-time { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
         .post-text { margin-bottom: 12px; line-height: 1.6; font-size: 14px; color: rgba(255,255,255,0.88); }
         .post-image { max-width: 100%; border-radius: var(--radius-md); margin-bottom: 12px; cursor: pointer; display: block; }
+        .post-video { max-width: 100%; border-radius: var(--radius-md); margin-bottom: 12px; cursor: pointer; }
         .post-stats {
             display: flex; gap: 18px; padding: 10px 0;
             border-top: 1px solid var(--border);
@@ -408,7 +414,7 @@
             padding: 3px 10px; font-size: 11px; font-weight: 700; flex-shrink: 0;
             min-width: 28px; text-align: center;
         }
-        /* Стили для страницы чата (при открытом окне) */
+        /* Стили для страницы чата */
         .chat-page {
             display: flex;
             flex-direction: column;
@@ -667,15 +673,16 @@
             .message { max-width: 82%; }
             .apple-day { font-size: 12px; }
             .time-slot { padding: 4px 10px; font-size: 12px; }
+            .post-video { max-height: 240px; }
         }
     </style>
 </head>
 <body>
+    <!-- Если нужен видео-фон, раскомментировать:
     <video class="video-background" autoplay loop muted playsinline>
         <source src="https://sylvan.apple.com/itunes-assets/Aerials116/v4/cb/5b/50/cb5b5035-6701-619f-9065-3d7d0e5fbef4/A007C0001_Final_v2_HEVC.mov" type="video/mp4">
     </video>
-    <div class="video-overlay"></div>
-
+    -->
     <nav class="navbar">
         <div class="logo"><span class="logo-icon">🌿</span><span>Therapy Call</span></div>
         <div id="navAuth" class="auth-buttons">
@@ -849,6 +856,7 @@
                         </div>
                         <div class="post-text">${escapeHtml(post.text)}</div>
                         ${post.image ? `<img class="post-image" src="${escapeHtml(post.image)}" onclick="openImageModal('${escapeHtml(post.image)}')">` : ''}
+                        ${post.video ? `<video class="post-video" controls preload="metadata"><source src="${escapeHtml(post.video)}" type="video/mp4"></video>` : ''}
                         <div class="post-stats">
                             <button class="like-btn${post.userLiked ? ' liked' : ''}" data-id="${post.id}">
                                 <i class="fa-${post.userLiked ? 'solid' : 'regular'} fa-heart"></i>
@@ -1263,6 +1271,7 @@
                                 <div class="post-card glass-card">
                                     <div class="post-text">${escapeHtml(p.text)}</div>
                                     ${p.image ? `<img class="post-image" src="${escapeHtml(p.image)}" onclick="openImageModal('${escapeHtml(p.image)}')">` : ''}
+                                    ${p.video ? `<video class="post-video" controls preload="metadata"><source src="${escapeHtml(p.video)}" type="video/mp4"></video>` : ''}
                                     <div class="post-stats">
                                         <span style="color:var(--text-muted);font-size:13px;display:flex;gap:6px;align-items:center;"><i class="fa-regular fa-heart"></i> ${p.likesCount||0}</span>
                                         <span style="color:var(--text-muted);font-size:13px;display:flex;gap:6px;align-items:center;"><i class="fa-regular fa-comment"></i> ${p.commentsCount||0}</span>
@@ -1829,6 +1838,7 @@
                                 <div class="post-card glass-card">
                                     <div class="post-text">${escapeHtml(pst.text)}</div>
                                     ${pst.image ? `<img class="post-image" src="${escapeHtml(pst.image)}" onclick="openImageModal('${escapeHtml(pst.image)}')">` : ''}
+                                    ${pst.video ? `<video class="post-video" controls preload="metadata"><source src="${escapeHtml(pst.video)}" type="video/mp4"></video>` : ''}
                                     <div class="post-stats">
                                         <span style="color:var(--text-muted);font-size:13px;display:flex;gap:6px;align-items:center;"><i class="fa-regular fa-heart"></i> ${pst.likesCount||0}</span>
                                         <span style="color:var(--text-muted);font-size:13px;display:flex;gap:6px;align-items:center;"><i class="fa-regular fa-comment"></i> ${pst.commentsCount||0}</span>
@@ -1916,7 +1926,6 @@
 
         async function openChat(userId, userName) {
             currentChatPartner = { id: userId, name: userName };
-            // Помечаем как прочитанные
             await fetch('/api/messages/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, fromUserId: userId }) });
             if (currentUser.unreadCounts && currentUser.unreadCounts[userId]) {
                 delete currentUser.unreadCounts[userId];
@@ -2247,7 +2256,7 @@
             };
         }
 
-        // ======================= ПОСТЫ =======================
+        // ======================= ПОСТЫ (новый пост с видео) =======================
         function createPostModal() {
             const html = `
                 <div class="modal" id="cpModal">
@@ -2255,8 +2264,9 @@
                         <div class="modal-handle"></div>
                         <h3>Новый пост</h3>
                         <textarea id="postText" rows="5" placeholder="Поделитесь чем-то полезным..."></textarea>
-                        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;">Фото (необязательно)</label>
-                        <input type="file" id="postImg" accept="image/*" style="font-size:12px;">
+                        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;">Фото или видео (необязательно, видео до 1 минуты)</label>
+                        <input type="file" id="postMedia" accept="image/*,video/*" style="font-size:12px;">
+                        <div id="mediaPreview" style="margin-top:8px; display:none;"></div>
                         <div class="modal-buttons">
                             <button class="btn-secondary" onclick="closeModal('cpModal')">Отмена</button>
                             <button class="btn-primary" onclick="createPost()">Опубликовать</button>
@@ -2265,6 +2275,40 @@
                 </div>`;
             document.body.insertAdjacentHTML('beforeend', html);
             setTimeout(() => document.getElementById('cpModal').classList.add('active'), 10);
+            
+            const mediaInput = document.getElementById('postMedia');
+            const previewDiv = document.getElementById('mediaPreview');
+            mediaInput.onchange = async () => {
+                const file = mediaInput.files[0];
+                if (!file) return;
+                if (file.type.startsWith('video/')) {
+                    const video = document.createElement('video');
+                    video.preload = 'metadata';
+                    video.onloadedmetadata = () => {
+                        URL.revokeObjectURL(video.src);
+                        if (video.duration > 60) {
+                            showToast('Видео не должно превышать 60 секунд', true);
+                            mediaInput.value = '';
+                            previewDiv.innerHTML = '';
+                            previewDiv.style.display = 'none';
+                        } else {
+                            previewDiv.innerHTML = `<video controls style="max-width:100%; max-height:120px; border-radius:12px;"><source src="${URL.createObjectURL(file)}"></video><div style="font-size:11px; color:var(--text-muted); margin-top:4px;">✅ Видео ${Math.round(video.duration)} сек.</div>`;
+                            previewDiv.style.display = 'block';
+                        }
+                    };
+                    video.src = URL.createObjectURL(file);
+                } else if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        previewDiv.innerHTML = `<img src="${e.target.result}" style="max-width:100%; max-height:120px; border-radius:12px;">`;
+                        previewDiv.style.display = 'block';
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    showToast('Неподдерживаемый формат', true);
+                    mediaInput.value = '';
+                }
+            };
         }
 
         async function createPost() {
@@ -2273,12 +2317,24 @@
             const fd = new FormData();
             fd.append('authorId', currentUser.id);
             fd.append('text', txt);
-            const fi = document.getElementById('postImg');
-            if (fi.files[0]) fd.append('image', fi.files[0]);
-            await fetch('/api/posts', { method:'POST', body: fd });
-            closeModal('cpModal');
-            showToast('Пост опубликован');
-            renderProfile();
+            const mediaFile = document.getElementById('postMedia').files[0];
+            if (mediaFile) {
+                if (mediaFile.type.startsWith('video/')) {
+                    fd.append('video', mediaFile);
+                } else if (mediaFile.type.startsWith('image/')) {
+                    fd.append('image', mediaFile);
+                }
+            }
+            const res = await fetch('/api/posts', { method:'POST', body: fd });
+            const data = await res.json();
+            if (data.success) {
+                closeModal('cpModal');
+                showToast('Пост опубликован');
+                if (currentTab === 'profile') renderProfile();
+                else renderFeed();
+            } else {
+                showToast(data.error || 'Ошибка публикации', true);
+            }
         }
 
         // ======================= ПОИСК =======================
