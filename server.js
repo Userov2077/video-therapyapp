@@ -9,11 +9,22 @@ require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
+const io = socketIo(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"],
+        credentials: true
+    },
+    transports: ['websocket', 'polling'], // разрешаем оба транспорта
+    allowEIO3: true // совместимость со старыми клиентами
+});
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.get('/socket.io/', (req, res) => {
+    res.status(404).send('Not Found');
+});
 
 // Подключение к PostgreSQL
 const pool = new Pool({
