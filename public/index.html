@@ -30,24 +30,8 @@
             background: #050a06;
             color: #fff;
             overflow-x: hidden;
-            min-height: 100vh;
-            touch-action: pan-x pan-y;
-        }
-        /* Обычный режим — отступ снизу под навигацию */
-        body:not(.chat-open) {
             padding-bottom: calc(var(--bottom-h) + env(safe-area-inset-bottom));
-        }
-        /* Режим открытого чата: фиксируем body, скроллится только main-content */
-        body.chat-open {
-            overflow: hidden;
-            position: fixed;
-            width: 100%;
-            height: 100%;
-        }
-        body.chat-open .main-content {
-            overflow-y: auto;
-            height: calc(100% - var(--nav-h) - var(--bottom-h));
-            -webkit-overflow-scrolling: touch;
+            min-height: 100vh;
         }
         .video-background { position: fixed; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; }
         .video-overlay {
@@ -90,7 +74,7 @@
         }
         .search-btn:hover { background: var(--green-dim); color: var(--green); }
         #navUser { display: flex; align-items: center; gap: 2px; }
-        .main-content { padding-top: var(--nav-h); min-height: 100vh; }
+        .main-content { padding-top: calc(var(--nav-h) + 12px); min-height: 100vh; }
         .container { max-width: 680px; margin: 0 auto; padding: 0 16px; }
         .bottom-nav {
             position: fixed; bottom: 0; left: 0; right: 0; height: var(--bottom-h);
@@ -428,7 +412,7 @@
         .chat-page {
             display: flex;
             flex-direction: column;
-            height: 100%;
+            height: calc(100vh - var(--nav-h) - var(--bottom-h));
             padding: 0 8px;
         }
         .chat-page .chat-messages-container {
@@ -679,7 +663,7 @@
             .btn-sm, .btn-login, .btn-register, .btn-logout { padding: 6px 14px; font-size: 12px; }
             .floating-notif { top: auto; bottom: calc(var(--bottom-h) + 10px); left: 16px; right: 16px; max-width: none; transform: translateY(120%); }
             .floating-notif.show { transform: translateY(0); }
-            .chat-page { height: 100%; }
+            .chat-page { height: calc(100vh - var(--nav-h) - var(--bottom-h)); }
             .message { max-width: 82%; }
             .apple-day { font-size: 12px; }
             .time-slot { padding: 4px 10px; font-size: 12px; }
@@ -1876,7 +1860,6 @@
 
         // ======================= ЧАТЫ =======================
         async function renderChats() {
-            document.body.classList.remove('chat-open');
             if (!currentUser) { showToast('Войдите в аккаунт', true); return; }
             document.getElementById('mainContent').innerHTML = `<div class="container"><div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i></div></div>`;
 
@@ -1962,7 +1945,6 @@
                     </div>
                 </div>
             `;
-            document.body.classList.add('chat-open');
 
             fetch(`/api/user/${userId}`).then(r => r.json()).then(d => {
                 const av = document.getElementById('chatPartnerAvatar');
@@ -2518,7 +2500,6 @@
         }
 
         function switchTab(tab) {
-            document.body.classList.remove('chat-open');
             currentTab = tab;
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
             const act = document.querySelector(`.nav-item[data-tab="${tab}"]`);
