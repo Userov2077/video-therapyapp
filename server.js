@@ -10,18 +10,16 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
-    cors: { origin: "*", methods: ["GET", "POST"], credentials: true },
-    transports: ['websocket', 'polling'],
-    allowEIO3: true,
-    path: '/socket.io'   // ← добавьте эту строку
-});
-io.engine.on('connection_error', (err) => {
-    console.error('Socket.IO engine error:', err);
+    cors: { origin: "*", methods: ["GET", "POST"] },
+    transports: ['polling', 'websocket'],
+    path: '/socket.io'
 });
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+// Явно раздаём папку uploads
+app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
 // PostgreSQL
 const pool = new Pool({
@@ -917,8 +915,13 @@ app.get('/api/psychologists', async (req, res) => {
 // WebRTC (Socket.IO)
 // ----------------------------------------------------------------------
 const activeRooms = new Map();
+
+io.engine.on('connection_error', (err) => {
+    console.error('Socket.IO engine error:', err);
+});
+
 io.on('connection', (socket) => {
-    console.log('🔌 WebSocket connected');
+    console.log('🔌 WebSocket connected', socket.id);
     socket.on('register_user', (userId) => { socket.userId = userId; if (userId) socket.join(userId); });
     socket.on('join-call-room', (roomId, userId, userType) => {
         try {
