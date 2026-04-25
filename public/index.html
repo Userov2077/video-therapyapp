@@ -989,6 +989,7 @@
             if (posts.length === 0) html += '<div class="empty-state glass-card"><i class="fas fa-newspaper"></i><div>Пока нет постов</div></div>';
             html += `</div></div>`;
             document.getElementById('mainContent').innerHTML = html;
+            initVideoObservers();
             attachFeedEvents();
         }
 
@@ -1094,6 +1095,7 @@
             if (allPsychologists.length === 0) html += '<div class="empty-state glass-card"><i class="fas fa-users"></i><div>Пока нет психологов</div></div>';
             html += `</div></div>`;
             document.getElementById('mainContent').innerHTML = html;
+            initVideoObservers();
         }
 
         // ======================= ПРОФИЛЬ (упрощённо, но все функции будут во второй части) =======================
@@ -2671,7 +2673,10 @@
             if (act) act.classList.add('active');
             if (tab === 'feed') renderFeed();
             else if (tab === 'psychologists') renderPsychologistsList();
-            else if (tab === 'chats') renderChats();
+            else if (tab === 'chats') {
+        // Перед рендером чатов обновляем данные пользователя
+                refreshUser().then(() => renderChats());
+            }
             else if (tab === 'notifications') renderNotifications();
             else if (tab === 'profile') renderProfile();
         }
@@ -2699,6 +2704,27 @@
             else { renderFeed(); }
         }
         init();
+        // Видео с автовоспроизведением при попадании в область видимости
+let videoObserver = null;
+function initVideoObservers() {
+    if (videoObserver) videoObserver.disconnect();
+    const videos = document.querySelectorAll('.post-video');
+    if (videos.length === 0) return;
+    videoObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            const video = entry.target;
+            if (entry.isIntersecting) {
+                // Видео в зоне видимости – пробуем воспроизвести
+                video.play().catch(e => console.log('Автовоспроизведение заблокировано', e));
+            } else {
+                // Видео ушло из зоны – останавливаем и сбрасываем время
+                video.pause();
+                video.currentTime = 0;
+            }
+        });
+    }, { threshold: 0.5 }); // порог 50% видимости
+    videos.forEach(video => videoObserver.observe(video));
+}
     </script>
 </body>
 </html>
