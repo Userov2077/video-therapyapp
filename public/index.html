@@ -855,65 +855,76 @@
 
         // ======================= ИНИЦИАЛИЗАЦИЯ СОКЕТА =======================
         function initSocket() {
-            if (socket) {
-                socket.disconnect();
-                socket = null;
-            }
-            socket = io();
-            socket.on('connect', () => {
-                if (currentUser) socket.emit('register_user', currentUser.id);
-            });
-            socket.on('new_message', async (msg) => {
-    await refreshUser();
-    if (currentChatPartner && (msg.from === currentChatPartner.id || msg.to === currentChatPartner.id)) {
-        await fetch('/api/messages/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, fromUserId: msg.from }) });
-        await loadChatMessages();
-        scrollToBottom();
-        if (currentUser.unreadCounts && currentUser.unreadCounts[msg.from]) {
-            delete currentUser.unreadCounts[msg.from];
-        }
-    } else {
-        const userRes = await fetch(`/api/user/${msg.from}`);
-        const userData = await userRes.json();
-        const senderName = userData.success ? userData.user.fullName : 'Кто-то';
+    if (socket) {
+        socket.disconnect();
+        socket = null;
+    }
+    socket = io();
+    socket.on('connect', () => {
+        if (currentUser) socket.emit('register_user', currentUser.id);
+    });
+    socket.on('new_message', async (msg) => {
+        // Обновляем данные пользователя, чтобы получить свежие unreadCounts
+        await refreshUser();
+        
+        // Определяем тип сообщения для уведомления
         let preview = '';
         if (msg.text) preview = msg.text.substring(0,50);
         else if (msg.image) preview = '📷 Фото';
         else if (msg.voice) preview = '🎤 Голосовое';
         else preview = 'Вложение';
+        
+        const userRes = await fetch(`/api/user/${msg.from}`);
+        const userData = await userRes.json();
+        const senderName = userData.success ? userData.user.fullName : 'Кто-то';
+        
+        // Всегда показываем всплывающее уведомление со звуком
         showFloatingNotification('Новое сообщение', `${senderName}: ${preview}`);
-        // Обновляем счётчик непрочитанных
-        if (currentUser && currentUser.unreadCounts) {
-            currentUser.unreadCounts[msg.from] = (currentUser.unreadCounts[msg.from] || 0) + 1;
+        
+        // Если открыт чат с этим отправителем, подгружаем сообщения и помечаем прочитанным
+        if (currentChatPartner && msg.from === currentChatPartner.id) {
+            await fetch('/api/messages/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, fromUserId: msg.from }) });
+            await loadChatMessages();
+            scrollToBottom();
+            // Сбрасываем счётчик для этого контакта
+            if (currentUser.unreadCounts && currentUser.unreadCounts[msg.from]) {
+                delete currentUser.unreadCounts[msg.from];
+            }
+            // Если список чатов открыт, обновляем его (чтобы убрать точку)
+            if (currentTab === 'chats') renderChats();
+        } else {
+            // Иначе обновляем счётчик непрочитанных в фоне
+            if (currentUser && currentUser.unreadCounts) {
+                currentUser.unreadCounts[msg.from] = (currentUser.unreadCounts[msg.from] || 0) + 1;
+            }
+            // Если открыта вкладка со списком чатов, обновляем список, чтобы появилась точка у нужного контакта
+            if (currentTab === 'chats') {
+                renderChats();
+            }
         }
-        // Если открыта вкладка чатов и нет активного чата, обновляем список
-        if (currentTab === 'chats' && !currentChatPartner) {
-            renderChats();
-        } else if (currentTab === 'chats' && currentChatPartner && currentChatPartner.id !== msg.from) {
-            // Если открыт чат с другим человеком, тоже обновляем список (чтобы появилась точка у нужного контакта)
-            renderChats();
+    });
+    socket.on('notification', (notif) => {
+        showFloatingNotification(notif.title, notif.message);
+        if (currentUser) refreshUser();
+        if (currentTab === 'notifications') renderNotifications();
+    });
+    socket.on('unread_update', (data) => {
+        if (currentUser && data.from && data.count !== undefined) {
+            if (!currentUser.unreadCounts) currentUser.unreadCounts = {};
+            currentUser.unreadCounts[data.from] = data.count;
+            if (currentTab === 'chats') renderChats();
         }
-    }
-});
-            socket.on('notification', (notif) => {
-                showFloatingNotification(notif.title, notif.message);
-                if (currentUser) refreshUser();
-                if (currentTab === 'notifications') renderNotifications();
-            });
-            socket.on('unread_update', (data) => {
-                if (currentUser && data.from && data.count !== undefined) {
-                    if (!currentUser.unreadCounts) currentUser.unreadCounts = {};
-                    currentUser.unreadCounts[data.from] = data.count;
-                    if (currentTab === 'chats') renderChats();
-                }
-            });
-        }
+    });
+}
 
         async function refreshUser() {
-            const r = await fetch(`/api/user/${currentUser.id}`);
-            const d = await r.json();
-            if (d.success) currentUser = d.user;
-        }
+    const r = await fetch(`/api/user/${currentUser.id}`);
+    const d = await r.json();
+    if (d.success) {
+        currentUser = d.user;
+        if (!currentUser.unreadCounts) currentUser.unreadCounts = {};
+    }
+}
 
         // ======================= ЛЕНТА =======================
         async function renderFeed() {
@@ -1961,59 +1972,61 @@
 
         // ======================= ЧАТЫ =======================
         async function renderChats() {
-            if (!currentUser) { showToast('Войдите в аккаунт', true); return; }
-            document.getElementById('mainContent').innerHTML = `<div class="container"><div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i></div></div>`;
+    if (!currentUser) { showToast('Войдите в аккаунт', true); return; }
+    // Обновляем данные пользователя, чтобы получить свежие unreadCounts
+    await refreshUser();
+    document.getElementById('mainContent').innerHTML = `<div class="container"><div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i></div></div>`;
 
-            const messagesRes = await fetchJSON(`/api/messages/${currentUser.id}`);
-            const messages = messagesRes.messages || [];
-            const contactsMap = new Map();
-            const unreadCountsFromServer = currentUser.unreadCounts || {};
+    const messagesRes = await fetchJSON(`/api/messages/${currentUser.id}`);
+    const messages = messagesRes.messages || [];
+    const contactsMap = new Map();
+    const unreadCountsFromServer = currentUser.unreadCounts || {};
 
-            messages.forEach(msg => {
-                const contactId = msg.from === currentUser.id ? msg.to : msg.from;
-                if (!contactsMap.has(contactId)) {
-                    contactsMap.set(contactId, {
-                        lastMessage: msg.text || (msg.image ? '📷 Фото' : (msg.voice ? '🎤 Голосовое' : 'Вложение')),
-                        lastTime: msg.createdAt,
-                    });
-                } else {
-                    const existing = contactsMap.get(contactId);
-                    if (new Date(msg.createdAt) > new Date(existing.lastTime)) {
-                        existing.lastMessage = msg.text || (msg.image ? '📷 Фото' : (msg.voice ? '🎤 Голосовое' : 'Вложение'));
-                        existing.lastTime = msg.createdAt;
-                    }
-                }
+    messages.forEach(msg => {
+        const contactId = msg.from === currentUser.id ? msg.to : msg.from;
+        if (!contactsMap.has(contactId)) {
+            contactsMap.set(contactId, {
+                lastMessage: msg.text || (msg.image ? '📷 Фото' : (msg.voice ? '🎤 Голосовое' : 'Вложение')),
+                lastTime: msg.createdAt,
             });
-
-            const contacts = await Promise.all(Array.from(contactsMap.keys()).map(async id => {
-                const r = await fetch(`/api/user/${id}`);
-                const d = await r.json();
-                if (d.success) {
-                    const unread = unreadCountsFromServer[id] || 0;
-                    return { ...d.user, ...contactsMap.get(id), unread };
-                }
-                return null;
-            }));
-
-            const validContacts = contacts.filter(Boolean).sort((a,b) => new Date(b.lastTime) - new Date(a.lastTime));
-
-            let html = `<div class="container"><div class="page-title">Сообщения</div><div class="chat-list">`;
-            for (const c of validContacts) {
-                html += `
-                    <div class="chat-contact glass-card" onclick="openChat('${c.id}','${escapeHtml(c.fullName)}')">
-                        <img class="chat-contact-avatar" src="${escapeHtml(c.avatar)}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(c.fullName)}&background=8bca8b&color=fff'">
-                        <div class="chat-contact-info">
-                            <div class="chat-contact-name">${escapeHtml(c.fullName)}</div>
-                            <div class="chat-contact-last">${escapeHtml((c.lastMessage || '').substring(0, 40))}</div>
-                        </div>
-                        ${c.unread > 0 ? `<div class="unread-badge">${c.unread}</div>` : ''}
-                    </div>
-                `;
+        } else {
+            const existing = contactsMap.get(contactId);
+            if (new Date(msg.createdAt) > new Date(existing.lastTime)) {
+                existing.lastMessage = msg.text || (msg.image ? '📷 Фото' : (msg.voice ? '🎤 Голосовое' : 'Вложение'));
+                existing.lastTime = msg.createdAt;
             }
-            if (validContacts.length === 0) html += '<div class="empty-state glass-card" style="padding:40px;"><i class="fas fa-comment-slash"></i><div>Нет сообщений. Напишите психологу из раздела «Психологи»!</div></div>';
-            html += `</div></div>`;
-            document.getElementById('mainContent').innerHTML = html;
         }
+    });
+
+    const contacts = await Promise.all(Array.from(contactsMap.keys()).map(async id => {
+        const r = await fetch(`/api/user/${id}`);
+        const d = await r.json();
+        if (d.success) {
+            const unread = unreadCountsFromServer[id] || 0;
+            return { ...d.user, ...contactsMap.get(id), unread };
+        }
+        return null;
+    }));
+
+    const validContacts = contacts.filter(Boolean).sort((a,b) => new Date(b.lastTime) - new Date(a.lastTime));
+
+    let html = `<div class="container"><div class="page-title">Сообщения</div><div class="chat-list">`;
+    for (const c of validContacts) {
+        html += `
+            <div class="chat-contact glass-card" onclick="openChat('${c.id}','${escapeHtml(c.fullName)}')">
+                <img class="chat-contact-avatar" src="${escapeHtml(c.avatar)}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(c.fullName)}&background=8bca8b&color=fff'">
+                <div class="chat-contact-info">
+                    <div class="chat-contact-name">${escapeHtml(c.fullName)}</div>
+                    <div class="chat-contact-last">${escapeHtml((c.lastMessage || '').substring(0, 40))}</div>
+                </div>
+                ${c.unread > 0 ? `<div class="unread-badge">${c.unread}</div>` : ''}
+            </div>
+        `;
+    }
+    if (validContacts.length === 0) html += '<div class="empty-state glass-card" style="padding:40px;"><i class="fas fa-comment-slash"></i><div>Нет сообщений. Напишите психологу из раздела «Психологи»!</div></div>';
+    html += `</div></div>`;
+    document.getElementById('mainContent').innerHTML = html;
+}
 
         async function openChat(userId, userName) {
     currentChatPartner = { id: userId, name: userName };
