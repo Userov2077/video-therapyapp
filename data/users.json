@@ -16,15 +16,31 @@
     "schedule": {
       "2026-04-13": [
         "14:00"
+      ],
+      "2026-04-25": [
+        "18:00"
+      ],
+      "2026-04-26": [
+        "15:00"
+      ],
+      "2026-04-30": [
+        "18:00"
       ]
     },
     "certificates": [
       {
-        "id": "1776026899135",
-        "title": "Сертификат",
-        "description": "",
-        "image": "/uploads/images/1776026899134-228429629.jpeg",
-        "createdAt": "2026-04-12T20:48:19.135Z"
+        "id": "1777068059586",
+        "userId": "1776026524109",
+        "title": "диплом",
+        "image": "/uploads/certificates/1777068059578-467617623.jpg",
+        "createdAt": "2026-04-24T22:00:59.586Z"
+      },
+      {
+        "id": "1777072508680",
+        "userId": "1776026524109",
+        "title": "диплом 2",
+        "image": "/uploads/certificates/1777072508677-675511370.png",
+        "createdAt": "2026-04-24T23:15:08.680Z"
       }
     ],
     "achievements": [
@@ -60,7 +76,8 @@
         "read": false,
         "createdAt": "2026-04-12T20:47:13.848Z"
       }
-    ]
+    ],
+    "rating": 5
   },
   {
     "id": "1776026629314",
@@ -77,7 +94,7 @@
     "schedule": {},
     "certificates": [],
     "achievements": [],
-    "avatar": "/uploads/images/1776026665649-372693806.jpeg",
+    "avatar": "/uploads/images/1777061042568-200582928.jpeg",
     "createdAt": "2026-04-12T20:43:49.314Z",
     "appointments": [
       {

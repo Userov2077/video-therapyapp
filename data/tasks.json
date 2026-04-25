@@ -1,0 +1,18 @@
+[
+  {
+    "id": "1777073080796",
+    "psychologistId": "1776026524109",
+    "text": "проверка1",
+    "dueDate": null,
+    "completed": false,
+    "createdAt": "2026-04-24T23:24:40.796Z"
+  },
+  {
+    "id": "1777112103391",
+    "psychologistId": "1776026524109",
+    "text": "проверка2",
+    "dueDate": "2026-04-26",
+    "completed": false,
+    "createdAt": "2026-04-25T10:15:03.391Z"
+  }
+]

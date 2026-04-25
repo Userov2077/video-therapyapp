@@ -15,7 +15,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Создание папок
-const uploadDirs = ['public/uploads', 'public/uploads/images', 'public/uploads/audio', 'public/uploads/recordings'];
+const uploadDirs = ['public/uploads', 'public/uploads/images', 'public/uploads/audio', 'public/uploads/recordings', 'public/uploads/files', 'public/uploads/certificates'];
 uploadDirs.forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
@@ -26,8 +26,8 @@ const storage = multer.diskStorage({
         else if (file.fieldname === 'image') cb(null, 'public/uploads/images/');
         else if (file.fieldname === 'voice') cb(null, 'public/uploads/audio/');
         else if (file.fieldname === 'recording') cb(null, 'public/uploads/recordings/');
-        else if (file.fieldname === 'certificate') cb(null, 'public/uploads/images/');
-        else if (file.fieldname === 'file') cb(null, 'public/uploads/images/');
+        else if (file.fieldname === 'certificate') cb(null, 'public/uploads/certificates/');
+        else if (file.fieldname === 'file') cb(null, 'public/uploads/files/');
         else cb(null, 'public/uploads/');
     },
     filename: (req, file, cb) => {
@@ -36,12 +36,12 @@ const storage = multer.diskStorage({
     }
 });
 
-const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
+const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
 
 // Загрузка данных
 const dataPath = './data/';
 if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath);
-const files = ['users', 'posts', 'likes', 'comments', 'messages', 'appointments', 'recordings'];
+const files = ['users', 'posts', 'likes', 'comments', 'messages', 'appointments', 'recordings', 'tasks', 'reviews', 'notes', 'subscriptions', 'certificates'];
 const globalData = {};
 files.forEach(f => {
     try { globalData[f] = JSON.parse(fs.readFileSync(`${dataPath}${f}.json`, 'utf8')); }
@@ -51,7 +51,7 @@ files.forEach(f => {
 function saveData() { files.forEach(f => fs.writeFileSync(`${dataPath}${f}.json`, JSON.stringify(globalData[f], null, 2))); }
 const getUser = id => globalData.users.find(u => u.id === id);
 
-// ---- Регистрация и авторизация (без изменений) ----
+// ---- Регистрация и авторизация ----
 app.post('/api/register', (req, res) => {
     const { fullName, email, phone, password, role, specialization, experience, about } = req.body;
     if (globalData.users.find(u => u.email === email)) return res.json({ success: false, error: 'Email уже используется' });
@@ -71,7 +71,7 @@ app.post('/api/register', (req, res) => {
         topics: [],
         schedule: {},
         certificates: [],
-        achievements: [],
+        rating: 0,
         avatar: `https://ui-avatars.com/api/?background=8bca8b&color=fff&name=${encodeURIComponent(fullName)}&size=128`,
         createdAt: new Date().toISOString(),
         appointments: [],
@@ -92,7 +92,11 @@ app.post('/api/login', (req, res) => {
 
 app.get('/api/user/:id', (req, res) => {
     const user = getUser(req.params.id);
-    if (user) { const { password, ...userData } = user; res.json({ success: true, user: userData }); }
+    if (user) { 
+        const { password, ...userData } = user; 
+        if (!userData.certificates) userData.certificates = [];
+        res.json({ success: true, user: userData }); 
+    }
     else res.json({ success: false, error: 'Пользователь не найден' });
 });
 
@@ -134,6 +138,12 @@ app.post('/api/upload-avatar', upload.single('avatar'), (req, res) => {
     res.json({ success: true, avatarUrl: `/uploads/images/${req.file.filename}` });
 });
 
+app.post('/api/upload', upload.single('file'), (req, res) => {
+    if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
+    const fileUrl = `/uploads/files/${req.file.filename}`;
+    res.json({ success: true, fileUrl });
+});
+
 app.post('/api/upload-chat-image', upload.single('image'), (req, res) => {
     if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
     res.json({ success: true, imageUrl: `/uploads/images/${req.file.filename}` });
@@ -159,50 +169,60 @@ app.post('/api/upload-recording', upload.single('recording'), (req, res) => {
     res.json({ success: true, recordingUrl: recording.url });
 });
 
-// ---- Сертификаты и достижения ----
-app.post('/api/certificate', upload.single('file'), (req, res) => {
-    const { userId, title, description } = req.body;
-    const user = getUser(userId);
-    if (!user || user.role !== 'psychologist') return res.json({ success: false, error: 'Нет прав' });
-    if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
-    
-    const cert = {
-        id: Date.now().toString(),
-        title: title || 'Сертификат',
-        description: description || '',
-        image: `/uploads/images/${req.file.filename}`,
-        createdAt: new Date().toISOString()
-    };
-    user.certificates.push(cert);
-    saveData();
-    res.json({ success: true, certificate: cert });
+// ---- СЕРТИФИКАТЫ (ИСПРАВЛЕННАЯ ВЕРСИЯ) ----
+// ---- СЕРТИФИКАТЫ (исправленная версия 2) ----
+app.post('/api/certificates', upload.single('certificate'), (req, res) => {
+    try {
+        const { userId, title } = req.body;
+        const user = getUser(userId);
+        if (!user) return res.json({ success: false, error: 'Пользователь не найден' });
+        if (user.role !== 'psychologist') return res.json({ success: false, error: 'Нет прав' });
+        if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
+        
+        const newCert = {
+            id: Date.now().toString(),
+            userId: userId,
+            title: title || 'Сертификат',
+            image: `/uploads/certificates/${req.file.filename}`,
+            createdAt: new Date().toISOString()
+        };
+        
+        if (!globalData.certificates) globalData.certificates = [];
+        globalData.certificates.push(newCert);
+        
+        if (!user.certificates) user.certificates = [];
+        user.certificates.push(newCert);
+        
+        saveData();
+        
+        // Возвращаем обновлённого пользователя целиком, чтобы клиент мог сразу обновить currentUser
+        const { password, ...safeUser } = user;
+        res.json({ success: true, certificate: newCert, user: safeUser });
+    } catch (err) {
+        console.error('Ошибка добавления сертификата:', err);
+        res.json({ success: false, error: 'Ошибка сервера' });
+    }
 });
 
-app.delete('/api/certificate/:userId/:certId', (req, res) => {
-    const user = getUser(req.params.userId);
-    if (!user) return res.json({ success: false });
-    user.certificates = user.certificates.filter(c => c.id !== req.params.certId);
-    saveData();
-    res.json({ success: true });
+app.delete('/api/certificates/:userId/:certId', (req, res) => {
+    try {
+        const user = getUser(req.params.userId);
+        if (!user) return res.json({ success: false, error: 'Пользователь не найден' });
+        
+        globalData.certificates = (globalData.certificates || []).filter(c => c.id !== req.params.certId);
+        
+        if (user.certificates) {
+            user.certificates = user.certificates.filter(c => c.id !== req.params.certId);
+        }
+        
+        saveData();
+        
+        const { password, ...safeUser } = user;
+        res.json({ success: true, user: safeUser });
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
 });
-
-app.post('/api/achievement', (req, res) => {
-    const { userId, text } = req.body;
-    const user = getUser(userId);
-    if (!user || user.role !== 'psychologist') return res.json({ success: false });
-    user.achievements.push({ id: Date.now().toString(), text, createdAt: new Date().toISOString() });
-    saveData();
-    res.json({ success: true });
-});
-
-app.delete('/api/achievement/:userId/:achievementId', (req, res) => {
-    const user = getUser(req.params.userId);
-    if (!user) return res.json({ success: false });
-    user.achievements = user.achievements.filter(a => a.id !== req.params.achievementId);
-    saveData();
-    res.json({ success: true });
-});
-
 // ---- Посты ----
 app.get('/api/posts', (req, res) => {
     const posts = [...globalData.posts].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -213,7 +233,7 @@ app.get('/api/posts', (req, res) => {
         const userLiked = req.query.userId ? globalData.likes.some(l => l.postId === post.id && l.userId === req.query.userId) : false;
         return { 
             ...post, 
-            author: { id: author.id, fullName: author.fullName, avatar: author.avatar },
+            author: { id: author.id, fullName: author.fullName, avatar: author.avatar, rating: author.rating || 0 },
             likesCount,
             commentsCount: comments.length,
             comments,
@@ -319,12 +339,36 @@ app.post('/api/posts/:id/like', (req, res) => {
         const likesCount = globalData.likes.filter(l => l.postId === postId).length;
         saveData();
         io.emit('post_liked', { postId, likesCount, userId, liked: false });
+        const post = globalData.posts.find(p => p.id === postId);
+        if (post) {
+            const psychologist = getUser(post.authorId);
+            if (psychologist && psychologist.role === 'psychologist') {
+                const reviews = globalData.reviews.filter(r => r.psychologistId === psychologist.id);
+                const avgRating = reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0;
+                const totalLikes = globalData.posts.filter(p => p.authorId === psychologist.id).reduce((s, p) => s + globalData.likes.filter(l => l.postId === p.id).length, 0);
+                const bonus = Math.min(1, totalLikes * 0.01);
+                psychologist.rating = Math.min(5, avgRating + bonus);
+                saveData();
+            }
+        }
         res.json({ success: true, liked: false, likesCount });
     } else {
         globalData.likes.push({ id: Date.now().toString(), postId, userId, createdAt: new Date().toISOString() });
         const likesCount = globalData.likes.filter(l => l.postId === postId).length;
         saveData();
         io.emit('post_liked', { postId, likesCount, userId, liked: true });
+        const post = globalData.posts.find(p => p.id === postId);
+        if (post) {
+            const psychologist = getUser(post.authorId);
+            if (psychologist && psychologist.role === 'psychologist') {
+                const reviews = globalData.reviews.filter(r => r.psychologistId === psychologist.id);
+                const avgRating = reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0;
+                const totalLikes = globalData.posts.filter(p => p.authorId === psychologist.id).reduce((s, p) => s + globalData.likes.filter(l => l.postId === p.id).length, 0);
+                const bonus = Math.min(1, totalLikes * 0.01);
+                psychologist.rating = Math.min(5, avgRating + bonus);
+                saveData();
+            }
+        }
         res.json({ success: true, liked: true, likesCount });
     }
 });
@@ -373,6 +417,142 @@ app.post('/api/appointment/confirm', (req, res) => {
     res.json({ success: true });
 });
 
+// ---- Задачи ----
+app.get('/api/tasks/:psychologistId', (req, res) => {
+    const tasks = globalData.tasks.filter(t => t.psychologistId === req.params.psychologistId).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json({ success: true, tasks });
+});
+
+app.post('/api/tasks', (req, res) => {
+    const { psychologistId, text, dueDate } = req.body;
+    const newTask = {
+        id: Date.now().toString(),
+        psychologistId,
+        text,
+        dueDate: dueDate || null,
+        completed: false,
+        createdAt: new Date().toISOString()
+    };
+    globalData.tasks.push(newTask);
+    saveData();
+    res.json({ success: true, task: newTask });
+});
+
+app.put('/api/tasks/:taskId', (req, res) => {
+    const { completed, text, dueDate } = req.body;
+    const task = globalData.tasks.find(t => t.id === req.params.taskId);
+    if (!task) return res.json({ success: false, error: 'Задача не найдена' });
+    if (completed !== undefined) task.completed = completed;
+    if (text !== undefined) task.text = text;
+    if (dueDate !== undefined) task.dueDate = dueDate;
+    saveData();
+    res.json({ success: true, task });
+});
+
+app.delete('/api/tasks/:taskId', (req, res) => {
+    globalData.tasks = globalData.tasks.filter(t => t.id !== req.params.taskId);
+    saveData();
+    res.json({ success: true });
+});
+
+// ---- Заметки ----
+app.get('/api/notes/:psychologistId', (req, res) => {
+    const notes = globalData.notes.filter(n => n.psychologistId === req.params.psychologistId).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json({ success: true, notes });
+});
+
+app.post('/api/notes', (req, res) => {
+    const { psychologistId, title, content, attachment, attachmentType } = req.body;
+    const newNote = {
+        id: Date.now().toString(),
+        psychologistId,
+        title,
+        content,
+        attachment: attachment || null,
+        attachmentType: attachmentType || null,
+        createdAt: new Date().toISOString()
+    };
+    globalData.notes.push(newNote);
+    saveData();
+    res.json({ success: true, note: newNote });
+});
+
+app.delete('/api/notes/:noteId', (req, res) => {
+    globalData.notes = globalData.notes.filter(n => n.id !== req.params.noteId);
+    saveData();
+    res.json({ success: true });
+});
+
+// ---- Отзывы ----
+app.post('/api/reviews', (req, res) => {
+    const { psychologistId, clientId, rating, text } = req.body;
+    const client = getUser(clientId);
+    const psychologist = getUser(psychologistId);
+    if (!client || !psychologist) return res.json({ success: false, error: 'Пользователь не найден' });
+    
+    const hasAppointment = client.appointments?.some(a => a.psychologistId === psychologistId && a.status === 'confirmed');
+    if (!hasAppointment) return res.json({ success: false, error: 'Вы можете оставить отзыв только после подтверждённого звонка' });
+    
+    const existing = globalData.reviews.some(r => r.psychologistId === psychologistId && r.clientId === clientId);
+    if (existing) return res.json({ success: false, error: 'Вы уже оставляли отзыв этому психологу' });
+    
+    const newReview = {
+        id: Date.now().toString(),
+        psychologistId,
+        clientId,
+        clientName: client.fullName,
+        rating: Math.min(5, Math.max(1, rating)),
+        text,
+        createdAt: new Date().toISOString()
+    };
+    globalData.reviews.push(newReview);
+    
+    const allReviews = globalData.reviews.filter(r => r.psychologistId === psychologistId);
+    const avgRating = allReviews.length ? allReviews.reduce((sum, r) => sum + r.rating, 0) / allReviews.length : 0;
+    const posts = globalData.posts.filter(p => p.authorId === psychologistId);
+    const totalLikes = posts.reduce((sum, p) => sum + globalData.likes.filter(l => l.postId === p.id).length, 0);
+    const bonus = Math.min(1, totalLikes * 0.01);
+    psychologist.rating = Math.min(5, avgRating + bonus);
+    saveData();
+    res.json({ success: true, review: newReview, newRating: psychologist.rating });
+});
+
+app.get('/api/reviews/:psychologistId', (req, res) => {
+    const reviews = globalData.reviews.filter(r => r.psychologistId === req.params.psychologistId).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json({ success: true, reviews });
+});
+
+// ---- Поиск ----
+app.get('/api/search/psychologists', (req, res) => {
+    const query = req.query.q?.toLowerCase() || '';
+    const psychologists = globalData.users
+        .filter(u => u.role === 'psychologist')
+        .filter(u => u.fullName.toLowerCase().includes(query))
+        .map(({ password, ...u }) => u);
+    res.json({ success: true, psychologists });
+});
+
+// ---- Подписки ----
+app.get('/api/subscriptions/:userId', (req, res) => {
+    const following = globalData.subscriptions.filter(s => s.followerId === req.params.userId).map(s => s.followingId);
+    const followers = globalData.subscriptions.filter(s => s.followingId === req.params.userId).map(s => s.followerId);
+    res.json({ success: true, following, followers });
+});
+
+app.post('/api/subscriptions', (req, res) => {
+    const { followerId, followingId } = req.body;
+    const existing = globalData.subscriptions.find(s => s.followerId === followerId && s.followingId === followingId);
+    if (existing) {
+        globalData.subscriptions = globalData.subscriptions.filter(s => !(s.followerId === followerId && s.followingId === followingId));
+        saveData();
+        res.json({ success: true, subscribed: false });
+    } else {
+        globalData.subscriptions.push({ id: Date.now().toString(), followerId, followingId, createdAt: new Date().toISOString() });
+        saveData();
+        res.json({ success: true, subscribed: true });
+    }
+});
+
 // ---- Чат ----
 app.get('/api/messages/:userId', (req, res) => {
     const userId = req.params.userId;
@@ -404,9 +584,8 @@ app.get('/api/psychologists', (req, res) => {
     res.json({ success: true, psychologists: globalData.users.filter(u => u.role === 'psychologist').map(({ password, ...u }) => u) });
 });
 
-// ---- WebRTC комнаты с улучшенной очисткой и поддержкой переподключения ----
-const activeRooms = new Map(); // roomId -> { psychologist: socketId, client: socketId, users: Map }
-
+// ---- WebRTC ----
+const activeRooms = new Map();
 io.on('connection', (socket) => {
     console.log(`🔌 Новое подключение: ${socket.id}`);
     
@@ -414,131 +593,69 @@ io.on('connection', (socket) => {
         socket.userId = userId;
         if (userId) {
             socket.join(userId);
-            console.log(`👤 Пользователь ${userId} зарегистрирован, сокет ${socket.id}`);
+            console.log(`👤 Пользователь ${userId} зарегистрирован`);
         }
     });
 
     socket.on('join-call-room', (roomId, userId, userType) => {
         try {
-            console.log(`📞 join-call-room: комната ${roomId}, пользователь ${userId} (${userType}), сокет ${socket.id}`);
-            
-            // Если комната уже существует, проверим, не заходит ли тот же пользователь повторно
-            if (activeRooms.has(roomId)) {
-                const room = activeRooms.get(roomId);
-                // Если это психолог и в комнате уже есть психолог, удалим старого
-                if (userType === 'psychologist' && room.psychologist && room.psychologist !== socket.id) {
-                    const oldSocketId = room.psychologist;
-                    console.log(`🔄 Замена психолога в комнате ${roomId}: ${oldSocketId} -> ${socket.id}`);
-                    io.to(oldSocketId).emit('partner-disconnected');
-                    // Удаляем старого из комнаты
-                    const oldSocket = io.sockets.sockets.get(oldSocketId);
-                    if (oldSocket) oldSocket.leave(roomId);
-                    room.psychologist = socket.id;
-                    room.users.delete(oldSocketId);
-                } else if (userType === 'client' && room.client && room.client !== socket.id) {
-                    const oldSocketId = room.client;
-                    console.log(`🔄 Замена клиента в комнате ${roomId}: ${oldSocketId} -> ${socket.id}`);
-                    io.to(oldSocketId).emit('partner-disconnected');
-                    const oldSocket = io.sockets.sockets.get(oldSocketId);
-                    if (oldSocket) oldSocket.leave(roomId);
-                    room.client = socket.id;
-                    room.users.delete(oldSocketId);
-                }
-                room.users.set(socket.id, { userId, userType });
-                if (userType === 'psychologist') room.psychologist = socket.id;
-                else room.client = socket.id;
-            } else {
-                // Новая комната
-                activeRooms.set(roomId, { psychologist: null, client: null, users: new Map() });
-                const room = activeRooms.get(roomId);
-                room.users.set(socket.id, { userId, userType });
-                if (userType === 'psychologist') room.psychologist = socket.id;
-                else room.client = socket.id;
+            if (!activeRooms.has(roomId)) activeRooms.set(roomId, { psychologist: null, client: null, users: new Map() });
+            const room = activeRooms.get(roomId);
+            if (userType === 'psychologist' && room.psychologist && room.psychologist !== socket.id) {
+                const oldSocketId = room.psychologist;
+                io.to(oldSocketId).emit('partner-disconnected');
+                const oldSocket = io.sockets.sockets.get(oldSocketId);
+                if (oldSocket) oldSocket.leave(roomId);
+                room.psychologist = socket.id;
+                room.users.delete(oldSocketId);
+            } else if (userType === 'client' && room.client && room.client !== socket.id) {
+                const oldSocketId = room.client;
+                io.to(oldSocketId).emit('partner-disconnected');
+                const oldSocket = io.sockets.sockets.get(oldSocketId);
+                if (oldSocket) oldSocket.leave(roomId);
+                room.client = socket.id;
+                room.users.delete(oldSocketId);
             }
+            room.users.set(socket.id, { userId, userType });
+            if (userType === 'psychologist') room.psychologist = socket.id;
+            else room.client = socket.id;
             
             socket.join(roomId);
             socket.roomId = roomId;
             socket.userId = userId;
             socket.userType = userType;
             
-            const room = activeRooms.get(roomId);
-            console.log(`📊 Текущее состояние комнаты ${roomId}: психолог=${room.psychologist}, клиент=${room.client}, users=${room.users.size}`);
-            
-            // Если оба участника в комнате, уведомляем их
             if (room.psychologist && room.client) {
-                console.log(`🎉 Оба участника в комнате ${roomId}, уведомляем о готовности`);
                 io.to(room.psychologist).emit('call-ready', { partnerId: room.client });
                 io.to(room.client).emit('call-ready', { partnerId: room.psychologist });
             }
             socket.emit('room-joined');
-        } catch (err) {
-            console.error('Ошибка в join-call-room:', err);
-        }
+        } catch (err) { console.error('join-call-room error:', err); }
     });
     
     socket.on('call-message', (msgData) => {
-        try {
-            const room = activeRooms.get(socket.roomId);
-            if (room) {
-                const targetId = socket.userType === 'psychologist' ? room.client : room.psychologist;
-                if (targetId) {
-                    io.to(targetId).emit('call-message', {
-                        from: socket.userId,
-                        text: msgData.text,
-                        time: new Date().toISOString()
-                    });
-                }
-                // Сохраняем сообщение в общий чат (опционально)
-                const newMsg = { 
-                    id: Date.now().toString(), 
-                    from: socket.userId, 
-                    to: socket.userType === 'psychologist' ? (room.client ? 'client' : 'unknown') : (room.psychologist ? 'psychologist' : 'unknown'),
-                    text: msgData.text, 
-                    createdAt: new Date().toISOString(), 
-                    isRead: false 
-                };
-                globalData.messages.push(newMsg);
-                saveData();
-            }
-        } catch (err) {
-            console.error('Ошибка в call-message:', err);
+        const room = activeRooms.get(socket.roomId);
+        if (room) {
+            const targetId = socket.userType === 'psychologist' ? room.client : room.psychologist;
+            if (targetId) io.to(targetId).emit('call-message', { from: socket.userId, text: msgData.text, time: new Date().toISOString() });
         }
     });
     
-    socket.on('offer', (data) => {
-        console.log(`📤 Offer от ${socket.id} к ${data.target}`);
-        socket.to(data.target).emit('offer', { sdp: data.sdp, from: socket.id });
-    });
-    
-    socket.on('answer', (data) => {
-        console.log(`📤 Answer от ${socket.id} к ${data.target}`);
-        socket.to(data.target).emit('answer', { sdp: data.sdp, from: socket.id });
-    });
-    
-    socket.on('ice-candidate', (data) => {
-        socket.to(data.target).emit('ice-candidate', { candidate: data.candidate, from: socket.id });
-    });
-    
+    socket.on('offer', (data) => socket.to(data.target).emit('offer', { sdp: data.sdp, from: socket.id }));
+    socket.on('answer', (data) => socket.to(data.target).emit('answer', { sdp: data.sdp, from: socket.id }));
+    socket.on('ice-candidate', (data) => socket.to(data.target).emit('ice-candidate', { candidate: data.candidate, from: socket.id }));
     socket.on('end-call', () => {
         if (socket.roomId) {
-            console.log(`📞 Завершение звонка в комнате ${socket.roomId} от ${socket.id}`);
             socket.to(socket.roomId).emit('call-ended');
-            // Не удаляем комнату сразу, чтобы другой участник мог переподключиться
-            // Удалим только через 5 секунд, если никто не переподключился
             setTimeout(() => {
                 const room = activeRooms.get(socket.roomId);
-                if (room && (!room.psychologist || !room.client)) {
-                    console.log(`🗑️ Удаляем пустую комнату ${socket.roomId}`);
-                    activeRooms.delete(socket.roomId);
-                }
+                if (room && (!room.psychologist || !room.client)) activeRooms.delete(socket.roomId);
             }, 5000);
             socket.leave(socket.roomId);
             delete socket.roomId;
         }
     });
-    
     socket.on('disconnect', () => {
-        console.log(`❌ Отключение сокета ${socket.id}`);
         if (socket.roomId) {
             socket.to(socket.roomId).emit('partner-disconnected');
             const room = activeRooms.get(socket.roomId);
@@ -546,15 +663,9 @@ io.on('connection', (socket) => {
                 room.users.delete(socket.id);
                 if (socket.userType === 'psychologist') room.psychologist = null;
                 else room.client = null;
-                console.log(`📊 После отключения в комнате ${socket.roomId}: психолог=${room.psychologist}, клиент=${room.client}, users=${room.users.size}`);
-                // Если комната пуста, удаляем через 10 секунд
                 if (room.users.size === 0) {
                     setTimeout(() => {
-                        const currentRoom = activeRooms.get(socket.roomId);
-                        if (currentRoom && currentRoom.users.size === 0) {
-                            console.log(`🗑️ Удаляем пустую комнату ${socket.roomId}`);
-                            activeRooms.delete(socket.roomId);
-                        }
+                        if (activeRooms.get(socket.roomId)?.users.size === 0) activeRooms.delete(socket.roomId);
                     }, 10000);
                 }
             }
