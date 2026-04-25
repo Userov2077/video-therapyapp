@@ -411,7 +411,6 @@
             padding: 3px 10px; font-size: 11px; font-weight: 700; flex-shrink: 0;
             min-width: 28px; text-align: center;
         }
-        /* Стили для страницы чата */
         .chat-page {
             display: flex;
             flex-direction: column;
@@ -661,7 +660,6 @@
         .review-name { font-weight: 600; font-size: 13.5px; }
         .review-text { font-size: 13px; color: rgba(255,255,255,0.78); line-height: 1.5; }
         .review-time { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
-        /* Индикатор загрузки видео */
         .upload-progress {
             margin-top: 12px;
             background: rgba(139,202,139,0.2);
@@ -735,6 +733,7 @@
         let isLoading = false;
         let audioAllowed = false;
         let isPosting = false;
+        let videoObserver = null;
 
         // ======================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =======================
         function showToast(msg, isErr = false) {
@@ -853,78 +852,72 @@
             setTimeout(() => document.getElementById('imageModal').classList.add('active'), 10);
         }
 
+        // ======================= ОБНОВЛЕНИЕ ДАННЫХ ПОЛЬЗОВАТЕЛЯ =======================
+        window.refreshUser = async function() {
+            if (!currentUser) return;
+            const r = await fetch(`/api/user/${currentUser.id}`);
+            const d = await r.json();
+            if (d.success) {
+                currentUser = d.user;
+                if (!currentUser.unreadCounts) currentUser.unreadCounts = {};
+            }
+        };
+
         // ======================= ИНИЦИАЛИЗАЦИЯ СОКЕТА =======================
         function initSocket() {
-    if (socket) {
-        socket.disconnect();
-        socket = null;
-    }
-    socket = io();
-    socket.on('connect', () => {
-        if (currentUser) socket.emit('register_user', currentUser.id);
-    });
-    socket.on('new_message', async (msg) => {
-        // Обновляем данные пользователя, чтобы получить свежие unreadCounts
-        await refreshUser();
-        
-        // Определяем тип сообщения для уведомления
-        let preview = '';
-        if (msg.text) preview = msg.text.substring(0,50);
-        else if (msg.image) preview = '📷 Фото';
-        else if (msg.voice) preview = '🎤 Голосовое';
-        else preview = 'Вложение';
-        
-        const userRes = await fetch(`/api/user/${msg.from}`);
-        const userData = await userRes.json();
-        const senderName = userData.success ? userData.user.fullName : 'Кто-то';
-        
-        // Всегда показываем всплывающее уведомление со звуком
-        showFloatingNotification('Новое сообщение', `${senderName}: ${preview}`);
-        
-        // Если открыт чат с этим отправителем, подгружаем сообщения и помечаем прочитанным
-        if (currentChatPartner && msg.from === currentChatPartner.id) {
-            await fetch('/api/messages/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, fromUserId: msg.from }) });
-            await loadChatMessages();
-            scrollToBottom();
-            // Сбрасываем счётчик для этого контакта
-            if (currentUser.unreadCounts && currentUser.unreadCounts[msg.from]) {
-                delete currentUser.unreadCounts[msg.from];
+            if (socket) {
+                socket.disconnect();
+                socket = null;
             }
-            // Если список чатов открыт, обновляем его (чтобы убрать точку)
-            if (currentTab === 'chats') renderChats();
-        } else {
-            // Иначе обновляем счётчик непрочитанных в фоне
-            if (currentUser && currentUser.unreadCounts) {
-                currentUser.unreadCounts[msg.from] = (currentUser.unreadCounts[msg.from] || 0) + 1;
-            }
-            // Если открыта вкладка со списком чатов, обновляем список, чтобы появилась точка у нужного контакта
-            if (currentTab === 'chats') {
-                renderChats();
-            }
+            socket = io();
+            socket.on('connect', () => {
+                if (currentUser) socket.emit('register_user', currentUser.id);
+            });
+            socket.on('new_message', async (msg) => {
+                await window.refreshUser();
+                
+                let preview = '';
+                if (msg.text) preview = msg.text.substring(0,50);
+                else if (msg.image) preview = '📷 Фото';
+                else if (msg.voice) preview = '🎤 Голосовое';
+                else preview = 'Вложение';
+                
+                const userRes = await fetch(`/api/user/${msg.from}`);
+                const userData = await userRes.json();
+                const senderName = userData.success ? userData.user.fullName : 'Кто-то';
+                
+                showFloatingNotification('Новое сообщение', `${senderName}: ${preview}`);
+                
+                if (currentChatPartner && msg.from === currentChatPartner.id) {
+                    await fetch('/api/messages/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, fromUserId: msg.from }) });
+                    await loadChatMessages();
+                    scrollToBottom();
+                    if (currentUser.unreadCounts && currentUser.unreadCounts[msg.from]) {
+                        delete currentUser.unreadCounts[msg.from];
+                    }
+                    if (currentTab === 'chats') renderChats();
+                } else {
+                    if (currentUser && currentUser.unreadCounts) {
+                        currentUser.unreadCounts[msg.from] = (currentUser.unreadCounts[msg.from] || 0) + 1;
+                    }
+                    if (currentTab === 'chats') {
+                        renderChats();
+                    }
+                }
+            });
+            socket.on('notification', (notif) => {
+                showFloatingNotification(notif.title, notif.message);
+                if (currentUser) window.refreshUser();
+                if (currentTab === 'notifications') renderNotifications();
+            });
+            socket.on('unread_update', (data) => {
+                if (currentUser && data.from && data.count !== undefined) {
+                    if (!currentUser.unreadCounts) currentUser.unreadCounts = {};
+                    currentUser.unreadCounts[data.from] = data.count;
+                    if (currentTab === 'chats') renderChats();
+                }
+            });
         }
-    });
-    socket.on('notification', (notif) => {
-        showFloatingNotification(notif.title, notif.message);
-        if (currentUser) refreshUser();
-        if (currentTab === 'notifications') renderNotifications();
-    });
-    socket.on('unread_update', (data) => {
-        if (currentUser && data.from && data.count !== undefined) {
-            if (!currentUser.unreadCounts) currentUser.unreadCounts = {};
-            currentUser.unreadCounts[data.from] = data.count;
-            if (currentTab === 'chats') renderChats();
-        }
-    });
-}
-
-        async function refreshUser() {
-    const r = await fetch(`/api/user/${currentUser.id}`);
-    const d = await r.json();
-    if (d.success) {
-        currentUser = d.user;
-        if (!currentUser.unreadCounts) currentUser.unreadCounts = {};
-    }
-}
 
         // ======================= ЛЕНТА =======================
         async function renderFeed() {
@@ -1079,9 +1072,9 @@
             for (const p of allPsychologists) {
                 html += `
                     <div class="psychologist-item glass-card" onclick="viewPsychologistPage('${p.id}')">
-                        <img class="psychologist-avatar-list" src="${escapeHtml(p.avatar)}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(p.fullName)}&background=8bca8b&color=fff'">
+                        <img class="psychologist-avatar-list" src="${escapeHtml(p.avatar)}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(p.full_name)}&background=8bca8b&color=fff'">
                         <div class="psychologist-info">
-                            <div class="psychologist-name">${escapeHtml(p.fullName)}</div>
+                            <div class="psychologist-name">${escapeHtml(p.full_name)}</div>
                             <div class="psychologist-spec">${escapeHtml(p.specialization || 'Психолог')}</div>
                             <div style="display:flex;align-items:center;gap:8px;margin-top:5px;">
                                 ${renderStars(p.rating || 0)}
@@ -1098,19 +1091,7 @@
             initVideoObservers();
         }
 
-        // ======================= ПРОФИЛЬ (упрощённо, но все функции будут во второй части) =======================
-        async function renderProfile() {
-            if (!currentUser) { showToast('Войдите в аккаунт', true); return; }
-            const isPsych = currentUser.role === 'psychologist';
-            document.getElementById('mainContent').innerHTML = `<div class="container"><div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i></div></div>`;
-            // Полный код renderProfile будет во второй части (очень большой)
-            // Здесь пока заглушка
-            setTimeout(() => {
-                document.getElementById('mainContent').innerHTML = '<div class="container"><div class="empty-state">Профиль загружается...</div></div>';
-            }, 100);
-        }
-
-                // ======================= ПРОФИЛЬ (ПОЛНАЯ ВЕРСИЯ) =======================
+        // ======================= ПРОФИЛЬ (ПОЛНАЯ ВЕРСИЯ) =======================
         async function renderProfile() {
             if (!currentUser) { showToast('Войдите в аккаунт', true); return; }
             const isPsych = currentUser.role === 'psychologist';
@@ -1130,7 +1111,6 @@
 
             let appointmentsHtml = '';
             if (!isPsych && currentUser.appointments) {
-                const now = new Date();
                 const appointments = currentUser.appointments.filter(a => a.status === 'confirmed' || a.status === 'completed');
                 appointmentsHtml = `<div class="profile-sections">
                     <div class="collapsible-section open">
@@ -1147,17 +1127,17 @@
                         <div class="collapsible-body">
                             ${appointments.map(apt => {
                                 const aptDateTime = new Date(`${apt.date}T${apt.time}`);
-                                const isCompleted = apt.status === 'completed' || aptDateTime < now;
+                                const isCompleted = apt.status === 'completed' || aptDateTime < new Date();
                                 const statusText = isCompleted ? '✅ Завершён' : (apt.status === 'confirmed' ? '✅ Подтверждён' : '⏳ Ожидает');
                                 return `
                                 <div class="appointment-item">
                                     <div class="appt-info">
-                                        <div class="appt-name">${escapeHtml(apt.psychologistName)}</div>
+                                        <div class="appt-name">${escapeHtml(apt.psychologist_name)}</div>
                                         <div class="appt-time">📅 ${apt.date} в ${apt.time}</div>
                                         <div class="appt-status ${isCompleted ? 'status-completed' : (apt.status === 'confirmed' ? 'status-confirmed' : 'status-pending')}">${statusText}</div>
                                     </div>
                                     <div class="appt-actions">
-                                        ${!isCompleted && apt.status === 'confirmed' ? `<button class="btn-sm" onclick="startCall('${apt.roomId}', 'client')"><i class="fas fa-video"></i> Войти</button>` : ''}
+                                        ${!isCompleted && apt.status === 'confirmed' ? `<button class="btn-sm" onclick="startCall('${apt.room_id}', 'client')"><i class="fas fa-video"></i> Войти</button>` : ''}
                                         ${isCompleted ? '<i class="fas fa-check-circle" style="color:var(--green); font-size:20px;"></i>' : ''}
                                     </div>
                                 </div>`;
@@ -1194,7 +1174,7 @@
                                     <input type="checkbox" class="task-checkbox task-cb" data-id="${t.id}" ${t.completed ? 'checked' : ''}>
                                     <div style="flex:1">
                                         <div class="task-text ${t.completed ? 'task-completed' : ''}">${escapeHtml(t.text)}</div>
-                                        ${t.dueDate ? `<div class="task-due">📅 ${t.dueDate}</div>` : ''}
+                                        ${t.due_date ? `<div class="task-due">📅 ${t.due_date}</div>` : ''}
                                     </div>
                                     <button class="task-delete" onclick="deleteTask('${t.id}')"><i class="fas fa-times"></i></button>
                                 </div>
@@ -1233,9 +1213,8 @@
                         </div>
                         <div class="collapsible-body">
                             ${(currentUser.clients || []).map(apt => {
-                                const now = new Date();
                                 const aptDateTime = new Date(`${apt.date}T${apt.time}`);
-                                const isCompleted = apt.status === 'completed' || aptDateTime < now;
+                                const isCompleted = apt.status === 'completed' || aptDateTime < new Date();
                                 return `
                                 <div class="appointment-item">
                                     <div class="appt-info">
@@ -1444,7 +1423,7 @@
             const tasks = tasksRes.tasks || [];
             const appointments = currentUser.clients || [];
             const events = [];
-            tasks.forEach(t => { if (t.dueDate) events.push({ date: t.dueDate.split('T')[0], title: t.text, type: 'task', roomId: null }); });
+            tasks.forEach(t => { if (t.due_date) events.push({ date: t.due_date, title: t.text, type: 'task', roomId: null }); });
             appointments.filter(a => a.status === 'confirmed').forEach(a => { events.push({ date: a.date, title: `Запись с ${a.clientName} в ${a.time}`, type: 'appointment', roomId: a.roomId }); });
 
             let daysHtml = '';
@@ -1531,7 +1510,7 @@
                 const data = await res.json();
                 if (data.success) {
                     if (data.user) currentUser = data.user;
-                    else await refreshUser();
+                    else await window.refreshUser();
                     showToast('Сертификат добавлен');
                     renderProfile();
                     setTimeout(() => {
@@ -1551,7 +1530,7 @@
                 const data = await res.json();
                 if (data.success) {
                     if (data.user) currentUser = data.user;
-                    else await refreshUser();
+                    else await window.refreshUser();
                     showToast('Сертификат удалён');
                     renderProfile();
                 } else {
@@ -1794,7 +1773,7 @@
             const data = await res.json();
             if (data.success) {
                 showToast('Запись подтверждена');
-                await refreshUser();
+                await window.refreshUser();
                 renderProfile();
             } else {
                 showToast('Ошибка подтверждения', true);
@@ -1958,11 +1937,11 @@
                         ${reviews.map(r => `
                             <div class="review-card glass-card">
                                 <div class="review-header">
-                                    <span class="review-name">${escapeHtml(r.clientName)}</span>
+                                    <span class="review-name">${escapeHtml(r.client_name)}</span>
                                     ${renderStars(r.rating)}
                                 </div>
                                 <div class="review-text">${escapeHtml(r.text)}</div>
-                                <div class="review-time">${new Date(r.createdAt).toLocaleString()}</div>
+                                <div class="review-time">${new Date(r.created_at).toLocaleString()}</div>
                             </div>
                         `).join('')}
                         ${reviews.length === 0 ? '<div class="empty-state glass-card" style="padding:20px;"><i class="fas fa-star"></i><div>Нет отзывов</div></div>' : ''}
@@ -1974,166 +1953,166 @@
 
         // ======================= ЧАТЫ =======================
         async function renderChats() {
-    if (!currentUser) { showToast('Войдите в аккаунт', true); return; }
-    // Обновляем данные пользователя, чтобы получить свежие unreadCounts
-    await refreshUser();
-    document.getElementById('mainContent').innerHTML = `<div class="container"><div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i></div></div>`;
+            if (!currentUser) { showToast('Войдите в аккаунт', true); return; }
+            await window.refreshUser();
+            document.getElementById('mainContent').innerHTML = `<div class="container"><div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i></div></div>`;
 
-    const messagesRes = await fetchJSON(`/api/messages/${currentUser.id}`);
-    const messages = messagesRes.messages || [];
-    const contactsMap = new Map();
-    const unreadCountsFromServer = currentUser.unreadCounts || {};
+            const messagesRes = await fetchJSON(`/api/messages/${currentUser.id}`);
+            const messages = messagesRes.messages || [];
+            const contactsMap = new Map();
+            const unreadCountsFromServer = currentUser.unreadCounts || {};
 
-    messages.forEach(msg => {
-        const contactId = msg.from === currentUser.id ? msg.to : msg.from;
-        if (!contactsMap.has(contactId)) {
-            contactsMap.set(contactId, {
-                lastMessage: msg.text || (msg.image ? '📷 Фото' : (msg.voice ? '🎤 Голосовое' : 'Вложение')),
-                lastTime: msg.createdAt,
+            messages.forEach(msg => {
+                const contactId = msg.from_user === currentUser.id ? msg.to_user : msg.from_user;
+                if (!contactsMap.has(contactId)) {
+                    contactsMap.set(contactId, {
+                        lastMessage: msg.text || (msg.image ? '📷 Фото' : (msg.voice ? '🎤 Голосовое' : 'Вложение')),
+                        lastTime: msg.created_at,
+                    });
+                } else {
+                    const existing = contactsMap.get(contactId);
+                    if (new Date(msg.created_at) > new Date(existing.lastTime)) {
+                        existing.lastMessage = msg.text || (msg.image ? '📷 Фото' : (msg.voice ? '🎤 Голосовое' : 'Вложение'));
+                        existing.lastTime = msg.created_at;
+                    }
+                }
             });
-        } else {
-            const existing = contactsMap.get(contactId);
-            if (new Date(msg.createdAt) > new Date(existing.lastTime)) {
-                existing.lastMessage = msg.text || (msg.image ? '📷 Фото' : (msg.voice ? '🎤 Голосовое' : 'Вложение'));
-                existing.lastTime = msg.createdAt;
+
+            const contacts = await Promise.all(Array.from(contactsMap.keys()).map(async id => {
+                const r = await fetch(`/api/user/${id}`);
+                const d = await r.json();
+                if (d.success) {
+                    const unread = unreadCountsFromServer[id] || 0;
+                    return { ...d.user, ...contactsMap.get(id), unread };
+                }
+                return null;
+            }));
+
+            const validContacts = contacts.filter(Boolean).sort((a,b) => new Date(b.lastTime) - new Date(a.lastTime));
+
+            let html = `<div class="container"><div class="page-title">Сообщения</div><div class="chat-list">`;
+            for (const c of validContacts) {
+                html += `
+                    <div class="chat-contact glass-card" onclick="openChat('${c.id}','${escapeHtml(c.fullName)}')">
+                        <img class="chat-contact-avatar" src="${escapeHtml(c.avatar)}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(c.fullName)}&background=8bca8b&color=fff'">
+                        <div class="chat-contact-info">
+                            <div class="chat-contact-name">${escapeHtml(c.fullName)}</div>
+                            <div class="chat-contact-last">${escapeHtml((c.lastMessage || '').substring(0, 40))}</div>
+                        </div>
+                        ${c.unread > 0 ? `<div class="unread-badge">${c.unread}</div>` : ''}
+                    </div>
+                `;
             }
+            if (validContacts.length === 0) html += '<div class="empty-state glass-card" style="padding:40px;"><i class="fas fa-comment-slash"></i><div>Нет сообщений. Напишите психологу из раздела «Психологи»!</div></div>';
+            html += `</div></div>`;
+            document.getElementById('mainContent').innerHTML = html;
         }
-    });
-
-    const contacts = await Promise.all(Array.from(contactsMap.keys()).map(async id => {
-        const r = await fetch(`/api/user/${id}`);
-        const d = await r.json();
-        if (d.success) {
-            const unread = unreadCountsFromServer[id] || 0;
-            return { ...d.user, ...contactsMap.get(id), unread };
-        }
-        return null;
-    }));
-
-    const validContacts = contacts.filter(Boolean).sort((a,b) => new Date(b.lastTime) - new Date(a.lastTime));
-
-    let html = `<div class="container"><div class="page-title">Сообщения</div><div class="chat-list">`;
-    for (const c of validContacts) {
-        html += `
-            <div class="chat-contact glass-card" onclick="openChat('${c.id}','${escapeHtml(c.fullName)}')">
-                <img class="chat-contact-avatar" src="${escapeHtml(c.avatar)}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(c.fullName)}&background=8bca8b&color=fff'">
-                <div class="chat-contact-info">
-                    <div class="chat-contact-name">${escapeHtml(c.fullName)}</div>
-                    <div class="chat-contact-last">${escapeHtml((c.lastMessage || '').substring(0, 40))}</div>
-                </div>
-                ${c.unread > 0 ? `<div class="unread-badge">${c.unread}</div>` : ''}
-            </div>
-        `;
-    }
-    if (validContacts.length === 0) html += '<div class="empty-state glass-card" style="padding:40px;"><i class="fas fa-comment-slash"></i><div>Нет сообщений. Напишите психологу из раздела «Психологи»!</div></div>';
-    html += `</div></div>`;
-    document.getElementById('mainContent').innerHTML = html;
-}
 
         async function openChat(userId, userName) {
-    currentChatPartner = { id: userId, name: userName };
-    await fetch('/api/messages/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, fromUserId: userId }) });
-    if (currentUser.unreadCounts && currentUser.unreadCounts[userId]) {
-        delete currentUser.unreadCounts[userId];
-    }
-    // Убираем вызов renderChats() – он больше не нужен
+            currentChatPartner = { id: userId, name: userName };
+            await fetch('/api/messages/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, fromUserId: userId }) });
+            await window.refreshUser();
+            if (currentUser.unreadCounts && currentUser.unreadCounts[userId]) {
+                delete currentUser.unreadCounts[userId];
+            }
+            if (currentTab === 'chats') renderChats();
 
-    document.getElementById('mainContent').innerHTML = `
-        <div class="chat-page">
-            <div class="chat-messages-container">
-                <div class="chat-messages-header">
-                    <button class="back-btn" onclick="renderChats()"><i class="fas fa-arrow-left"></i></button>
-                    <img src="" id="chatPartnerAvatar" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--green-border);" onerror="this.style.display='none'">
-                    <div style="flex:1">
-                        <div style="font-weight:600;font-size:15px;">${escapeHtml(userName)}</div>
+            document.getElementById('mainContent').innerHTML = `
+                <div class="chat-page">
+                    <div class="chat-messages-container">
+                        <div class="chat-messages-header">
+                            <button class="back-btn" onclick="renderChats()"><i class="fas fa-arrow-left"></i></button>
+                            <img src="" id="chatPartnerAvatar" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--green-border);" onerror="this.style.display='none'">
+                            <div style="flex:1">
+                                <div style="font-weight:600;font-size:15px;">${escapeHtml(userName)}</div>
+                            </div>
+                        </div>
+                        <div class="chat-messages-list" id="chatMessagesList"></div>
+                        <div class="chat-input-area">
+                            <div class="chat-controls">
+                                <button id="attachImageBtn" title="Фото"><i class="fas fa-image"></i></button>
+                                <button id="voiceRecordBtn" title="Голосовое"><i class="fas fa-microphone"></i></button>
+                            </div>
+                            <input type="file" id="imageInput" accept="image/*" style="display:none">
+                            <input type="text" id="chatMessageInput" placeholder="Сообщение...">
+                            <button class="send-btn-chat" id="sendMsgBtn"><i class="fas fa-paper-plane"></i></button>
+                        </div>
                     </div>
                 </div>
-                <div class="chat-messages-list" id="chatMessagesList"></div>
-                <div class="chat-input-area">
-                    <div class="chat-controls">
-                        <button id="attachImageBtn" title="Фото"><i class="fas fa-image"></i></button>
-                        <button id="voiceRecordBtn" title="Голосовое"><i class="fas fa-microphone"></i></button>
-                    </div>
-                    <input type="file" id="imageInput" accept="image/*" style="display:none">
-                    <input type="text" id="chatMessageInput" placeholder="Сообщение...">
-                    <button class="send-btn-chat" id="sendMsgBtn"><i class="fas fa-paper-plane"></i></button>
-                </div>
-            </div>
-        </div>
-    `;
+            `;
 
-    fetch(`/api/user/${userId}`).then(r => r.json()).then(d => {
-        const av = document.getElementById('chatPartnerAvatar');
-        if (av && d.success) av.src = d.user.avatar;
-    });
+            fetch(`/api/user/${userId}`).then(r => r.json()).then(d => {
+                const av = document.getElementById('chatPartnerAvatar');
+                if (av && d.success) av.src = d.user.avatar;
+            });
 
-    await loadChatMessages();
-    scrollToBottom();
-
-    document.getElementById('sendMsgBtn').onclick = sendChatMessage;
-    document.getElementById('chatMessageInput').onkeypress = (e) => { if (e.key === 'Enter') sendChatMessage(); };
-
-    const attachImageBtn = document.getElementById('attachImageBtn');
-    const imageInput = document.getElementById('imageInput');
-    attachImageBtn.onclick = () => imageInput.click();
-    imageInput.onchange = async () => {
-        const file = imageInput.files[0];
-        if (!file || !file.type.startsWith('image/')) { showToast('Только изображения', true); return; }
-        const compressedBlob = await compressImage(file, 1024, 0.8);
-        const formData = new FormData();
-        formData.append('image', compressedBlob, file.name);
-        const res = await fetch('/api/upload-chat-image', { method:'POST', body: formData });
-        const data = await res.json();
-        if (data.success) {
-            await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ from: currentUser.id, to: currentChatPartner.id, text: '', image: data.imageUrl }) });
             await loadChatMessages();
             scrollToBottom();
-        }
-        imageInput.value = '';
-    };
 
-    let mediaRecorder = null, audioChunks = [], isRecording = false;
-    const voiceRecordBtn = document.getElementById('voiceRecordBtn');
-    voiceRecordBtn.onclick = async () => {
-        if (!isRecording) {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-                audioChunks = [];
-                mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
-                mediaRecorder.onstop = async () => {
-                    const blob = new Blob(audioChunks, { type: 'audio/webm' });
-                    const fd = new FormData(); fd.append('voice', blob, 'voice.webm');
-                    const res = await fetch('/api/upload-voice', { method:'POST', body: fd });
-                    const data = await res.json();
-                    if (data.success) {
-                        await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ from: currentUser.id, to: currentChatPartner.id, text: '', voice: data.voiceUrl }) });
-                        await loadChatMessages();
-                        scrollToBottom();
-                        showToast('Голосовое отправлено');
-                    }
-                    stream.getTracks().forEach(t => t.stop());
-                    voiceRecordBtn.innerHTML = '<i class="fas fa-microphone"></i>';
-                    voiceRecordBtn.classList.remove('recording-active');
-                    isRecording = false;
-                };
-                mediaRecorder.start();
-                isRecording = true;
-                voiceRecordBtn.classList.add('recording-active');
-                voiceRecordBtn.innerHTML = '<i class="fas fa-stop"></i>';
-                setTimeout(() => { if (mediaRecorder?.state === 'recording') mediaRecorder.stop(); }, 30000);
-            } catch(e) { showToast('Нет доступа к микрофону', true); }
-        } else {
-            if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
+            document.getElementById('sendMsgBtn').onclick = sendChatMessage;
+            document.getElementById('chatMessageInput').onkeypress = (e) => { if (e.key === 'Enter') sendChatMessage(); };
+
+            const attachImageBtn = document.getElementById('attachImageBtn');
+            const imageInput = document.getElementById('imageInput');
+            attachImageBtn.onclick = () => imageInput.click();
+            imageInput.onchange = async () => {
+                const file = imageInput.files[0];
+                if (!file || !file.type.startsWith('image/')) { showToast('Только изображения', true); return; }
+                const compressedBlob = await compressImage(file, 1024, 0.8);
+                const formData = new FormData();
+                formData.append('image', compressedBlob, file.name);
+                const res = await fetch('/api/upload-chat-image', { method:'POST', body: formData });
+                const data = await res.json();
+                if (data.success) {
+                    await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ from: currentUser.id, to: currentChatPartner.id, text: '', image: data.imageUrl }) });
+                    await loadChatMessages();
+                    scrollToBottom();
+                }
+                imageInput.value = '';
+            };
+
+            let mediaRecorder = null, audioChunks = [], isRecording = false;
+            const voiceRecordBtn = document.getElementById('voiceRecordBtn');
+            voiceRecordBtn.onclick = async () => {
+                if (!isRecording) {
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                        audioChunks = [];
+                        mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+                        mediaRecorder.onstop = async () => {
+                            const blob = new Blob(audioChunks, { type: 'audio/webm' });
+                            const fd = new FormData(); fd.append('voice', blob, 'voice.webm');
+                            const res = await fetch('/api/upload-voice', { method:'POST', body: fd });
+                            const data = await res.json();
+                            if (data.success) {
+                                await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ from: currentUser.id, to: currentChatPartner.id, text: '', voice: data.voiceUrl }) });
+                                await loadChatMessages();
+                                scrollToBottom();
+                                showToast('Голосовое отправлено');
+                            }
+                            stream.getTracks().forEach(t => t.stop());
+                            voiceRecordBtn.innerHTML = '<i class="fas fa-microphone"></i>';
+                            voiceRecordBtn.classList.remove('recording-active');
+                            isRecording = false;
+                        };
+                        mediaRecorder.start();
+                        isRecording = true;
+                        voiceRecordBtn.classList.add('recording-active');
+                        voiceRecordBtn.innerHTML = '<i class="fas fa-stop"></i>';
+                        setTimeout(() => { if (mediaRecorder?.state === 'recording') mediaRecorder.stop(); }, 30000);
+                    } catch(e) { showToast('Нет доступа к микрофону', true); }
+                } else {
+                    if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
+                }
+            };
         }
-    };
-}
 
         async function loadChatMessages() {
             if (!currentChatPartner) return;
             const res = await fetchJSON(`/api/messages/${currentUser.id}`);
-            const messages = (res.messages || []).filter(m => (m.from === currentChatPartner.id && m.to === currentUser.id) || (m.from === currentUser.id && m.to === currentChatPartner.id));
-            messages.sort((a,b) => new Date(a.createdAt) - new Date(b.createdAt));
+            const messages = (res.messages || []).filter(m => (m.from_user === currentChatPartner.id && m.to_user === currentUser.id) || (m.from_user === currentUser.id && m.to_user === currentChatPartner.id));
+            messages.sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
             const listDiv = document.getElementById('chatMessagesList');
             if (!listDiv) return;
             let html = '';
@@ -2143,11 +2122,11 @@
                     voiceHtml = `<div class="voice-message"><audio controls src="${escapeHtml(m.voice)}"></audio></div>`;
                 }
                 html += `
-                    <div class="message ${m.from === currentUser.id ? 'outgoing' : 'incoming'}">
+                    <div class="message ${m.from_user === currentUser.id ? 'outgoing' : 'incoming'}">
                         ${m.text ? `<div class="message-text">${escapeHtml(m.text)}</div>` : ''}
                         ${m.image ? `<img class="chat-image" src="${escapeHtml(m.image)}" onclick="openImageModal('${escapeHtml(m.image)}')">` : ''}
                         ${voiceHtml}
-                        <div class="message-time">${new Date(m.createdAt).toLocaleTimeString()}</div>
+                        <div class="message-time">${new Date(m.created_at).toLocaleTimeString()}</div>
                     </div>
                 `;
             }
@@ -2271,7 +2250,7 @@
             if (!window.selDate || !window.selTime) { showToast('Выберите время', true); return; }
             const r = await fetch('/api/appointment', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ clientId: currentUser.id, psychologistId: id, date: window.selDate, time: window.selTime }) });
             const d = await r.json();
-            if (d.success) { showToast('Заявка отправлена!'); closeModal('bookModal'); await refreshUser(); }
+            if (d.success) { showToast('Заявка отправлена!'); closeModal('bookModal'); await window.refreshUser(); }
             else showToast(d.error || 'Ошибка', true);
         }
 
@@ -2317,12 +2296,12 @@
                 if (!rating) { showToast('Выберите рейтинг', true); return; }
                 const r = await fetch('/api/reviews', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ psychologistId: pid, clientId: currentUser.id, rating, text: document.getElementById('revText').value }) });
                 const d = await r.json();
-                if (d.success) { showToast('Отзыв отправлен!'); closeModal('revModal'); await refreshUser(); }
+                if (d.success) { showToast('Отзыв отправлен!'); closeModal('revModal'); await window.refreshUser(); }
                 else showToast(d.error || 'Ошибка', true);
             };
         }
 
-        // ======================= НОВЫЙ ПОСТ (С ИНДИКАТОРОМ ЗАГРУЗКИ И ЗАЩИТОЙ) =======================
+        // ======================= НОВЫЙ ПОСТ =======================
         function createPostModal() {
             const html = `
                 <div class="modal" id="cpModal">
@@ -2443,12 +2422,6 @@
             };
         }
 
-        async function createPost() {
-            // Функция createPost теперь не используется, т.к. создание поста идёт через createPostModal
-            // Оставлена для совместимости, но неактивна
-            showToast('Используйте кнопку "Опубликовать" в модальном окне', true);
-        }
-
         // ======================= ПОИСК =======================
         function openSearchModal() {
             const html = `
@@ -2477,7 +2450,7 @@
                                 <div class="psychologist-item" style="padding:10px;cursor:pointer;border-radius:12px;transition:background 0.2s;" onclick="closeModal('searchM');viewPsychologistPage('${p.id}')">
                                     <img src="${escapeHtml(p.avatar)}" style="width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid var(--green-border);">
                                     <div>
-                                        <div style="font-weight:600;font-size:14px;">${escapeHtml(p.fullName)}</div>
+                                        <div style="font-weight:600;font-size:14px;">${escapeHtml(p.full_name)}</div>
                                         <div style="font-size:12px;color:var(--text-muted);">${escapeHtml(p.specialization||'Психолог')}</div>
                                     </div>
                                 </div>
@@ -2499,7 +2472,7 @@
                     const eventDate = new Date(apt.date + 'T' + apt.time);
                     const diff = (eventDate - now) / (1000 * 60);
                     if (diff > 0 && diff <= 60 && !localStorage.getItem(`notified_${apt.appointmentId}`)) {
-                        showFloatingNotification('Скоро созвон', `Запись с ${apt.clientName || apt.psychologistName} через ${Math.round(diff)} минут`, 'warning');
+                        showFloatingNotification('Скоро созвон', `Запись с ${apt.clientName || apt.psychologist_name} через ${Math.round(diff)} минут`, 'warning');
                         localStorage.setItem(`notified_${apt.appointmentId}`, '1');
                     }
                 }
@@ -2507,8 +2480,8 @@
             if (currentUser.role === 'psychologist') {
                 fetchJSON(`/api/tasks/${currentUser.id}`).then(res => {
                     for (const task of (res.tasks || [])) {
-                        if (!task.completed && task.dueDate) {
-                            const due = new Date(task.dueDate);
+                        if (!task.completed && task.due_date) {
+                            const due = new Date(task.due_date);
                             const today = new Date(); today.setHours(0,0,0,0);
                             const daysDiff = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
                             if (daysDiff === 0 && !localStorage.getItem(`task_today_${task.id}`)) {
@@ -2674,11 +2647,29 @@
             if (tab === 'feed') renderFeed();
             else if (tab === 'psychologists') renderPsychologistsList();
             else if (tab === 'chats') {
-        // Перед рендером чатов обновляем данные пользователя
-                refreshUser().then(() => renderChats());
+                window.refreshUser().then(() => renderChats());
             }
             else if (tab === 'notifications') renderNotifications();
             else if (tab === 'profile') renderProfile();
+        }
+
+        // ======================= ВИДЕО НАБЛЮДАТЕЛЬ =======================
+        function initVideoObservers() {
+            if (videoObserver) videoObserver.disconnect();
+            const videos = document.querySelectorAll('.post-video');
+            if (videos.length === 0) return;
+            videoObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+            const video = entry.target;
+            if (entry.isIntersecting) {
+                video.play().catch(e => console.log('Автовоспроизведение заблокировано', e));
+            } else {
+                video.pause();
+                video.currentTime = 0;
+            }
+        });
+            }, { threshold: 0.5 });
+            videos.forEach(video => videoObserver.observe(video));
         }
 
         // ======================= ИНИЦИАЛИЗАЦИЯ =======================
@@ -2704,30 +2695,6 @@
             else { renderFeed(); }
         }
         init();
-        // Видео с автовоспроизведением при попадании в область видимости
-let videoObserver = null;
-function initVideoObservers() {
-    if (videoObserver) videoObserver.disconnect();
-    const videos = document.querySelectorAll('.post-video');
-    if (videos.length === 0) return;
-    videoObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            const video = entry.target;
-            if (entry.isIntersecting) {
-                // Видео в зоне видимости – пробуем воспроизвести
-                video.play().catch(e => console.log('Автовоспроизведение заблокировано', e));
-            } else {
-                // Видео ушло из зоны – останавливаем и сбрасываем время
-                video.pause();
-                video.currentTime = 0;
-            }
-        });
-    }, { threshold: 0.5 }); // порог 50% видимости
-    videos.forEach(video => videoObserver.observe(video));
-}
-    </script>
-</body>
-</html>
     </script>
 </body>
 </html>

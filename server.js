@@ -10,23 +10,16 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"],
-        credentials: true
-    },
-    transports: ['websocket', 'polling'], // разрешаем оба транспорта
-    allowEIO3: true // совместимость со старыми клиентами
+    cors: { origin: "*", methods: ["GET", "POST"], credentials: true },
+    transports: ['websocket', 'polling'],
+    allowEIO3: true
 });
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.get('/socket.io/', (req, res) => {
-    res.status(404).send('Not Found');
-});
 
-// Подключение к PostgreSQL
+// PostgreSQL
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
@@ -61,27 +54,22 @@ const storage = multer.diskStorage({
 const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } });
 
 // ----------------------------------------------------------------------
-// Функция безопасного парсинга JSON
+// Вспомогательные функции
 // ----------------------------------------------------------------------
 function safeJSONParse(str, defaultValue = null) {
     if (!str || typeof str !== 'string') return defaultValue;
     try {
         return JSON.parse(str);
     } catch (e) {
-        console.warn(`⚠️ Ошибка парсинга JSON: ${e.message}, значение: ${str?.substring(0, 100)}`);
+        console.warn(`JSON parse error: ${e.message}`);
         return defaultValue;
     }
 }
 
-// ----------------------------------------------------------------------
-// Получение пользователя из БД
-// ----------------------------------------------------------------------
 async function getUser(id) {
     const result = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
     if (result.rows.length === 0) return null;
     const row = result.rows[0];
-    
-    // Преобразуем snake_case в camelCase
     const user = {
         id: row.id,
         fullName: row.full_name,
@@ -96,7 +84,6 @@ async function getUser(id) {
         rating: row.rating,
         avatar: row.avatar,
         createdAt: row.created_at,
-        // Парсим JSON поля с защитой
         topics: safeJSONParse(row.topics, []),
         schedule: safeJSONParse(row.schedule, {}),
         certificates: safeJSONParse(row.certificates, []),
@@ -108,11 +95,7 @@ async function getUser(id) {
     return user;
 }
 
-// ----------------------------------------------------------------------
-// Сохранение пользователя (обновление)
-// ----------------------------------------------------------------------
 async function updateUser(user) {
-    // Сериализуем JSON поля, гарантируя валидность
     const topics = JSON.stringify(Array.isArray(user.topics) ? user.topics : []);
     const schedule = JSON.stringify(user.schedule && typeof user.schedule === 'object' ? user.schedule : {});
     const certificates = JSON.stringify(Array.isArray(user.certificates) ? user.certificates : []);
@@ -129,43 +112,165 @@ async function updateUser(user) {
             avatar = $15, appointments = $16, clients = $17, notifications = $18, unread_counts = $19,
             created_at = $20
          WHERE id = $1`,
-        [
-            user.id, user.fullName, user.email, user.phone, user.password,
-            user.role, user.specialization, user.experience, user.about, user.price,
-            topics, schedule, certificates, user.rating,
-            user.avatar, appointments, clients, notifications, unreadCounts,
-            user.createdAt || new Date().toISOString()
-        ]
+        [user.id, user.fullName, user.email, user.phone, user.password, user.role,
+         user.specialization, user.experience, user.about, user.price,
+         topics, schedule, certificates, user.rating,
+         user.avatar, appointments, clients, notifications, unreadCounts,
+         user.createdAt || new Date().toISOString()]
     );
 }
 
 // ----------------------------------------------------------------------
-// Инициализация базы: принудительная очистка JSON полей (выполняется один раз)
+// Инициализация базы данных (создание таблиц и приведение JSON к норме)
 // ----------------------------------------------------------------------
 async function initDatabase() {
-    // Убедимся, что все JSON поля содержат валидные значения
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            full_name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            phone TEXT,
+            password TEXT NOT NULL,
+            role TEXT CHECK (role IN ('client', 'psychologist')) NOT NULL,
+            specialization TEXT,
+            experience TEXT,
+            about TEXT,
+            price INTEGER DEFAULT 0,
+            topics JSONB DEFAULT '[]'::jsonb,
+            schedule JSONB DEFAULT '{}'::jsonb,
+            certificates JSONB DEFAULT '[]'::jsonb,
+            rating REAL DEFAULT 0,
+            avatar TEXT,
+            appointments JSONB DEFAULT '[]'::jsonb,
+            clients JSONB DEFAULT '[]'::jsonb,
+            notifications JSONB DEFAULT '[]'::jsonb,
+            unread_counts JSONB DEFAULT '{}'::jsonb,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS posts (
+            id TEXT PRIMARY KEY,
+            author_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            text TEXT NOT NULL,
+            image TEXT,
+            video TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS likes (
+            id TEXT PRIMARY KEY,
+            post_id TEXT REFERENCES posts(id) ON DELETE CASCADE,
+            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(post_id, user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS comments (
+            id TEXT PRIMARY KEY,
+            post_id TEXT REFERENCES posts(id) ON DELETE CASCADE,
+            author_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            text TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY,
+            from_user TEXT REFERENCES users(id) ON DELETE CASCADE,
+            to_user TEXT REFERENCES users(id) ON DELETE CASCADE,
+            text TEXT,
+            image TEXT,
+            voice TEXT,
+            is_read BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS appointments (
+            id TEXT PRIMARY KEY,
+            psychologist_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            client_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            psychologist_name TEXT,
+            client_name TEXT,
+            date TEXT NOT NULL,
+            time TEXT NOT NULL,
+            room_id TEXT,
+            status TEXT CHECK (status IN ('pending', 'confirmed', 'completed')) DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            psychologist_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            text TEXT NOT NULL,
+            due_date DATE,
+            completed BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS notes (
+            id TEXT PRIMARY KEY,
+            psychologist_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            title TEXT NOT NULL,
+            content TEXT,
+            attachment TEXT,
+            attachment_type TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS reviews (
+            id TEXT PRIMARY KEY,
+            psychologist_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            client_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            client_name TEXT,
+            rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+            text TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id TEXT PRIMARY KEY,
+            follower_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            following_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(follower_id, following_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS certificates (
+            id TEXT PRIMARY KEY,
+            user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+            title TEXT,
+            image TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS recordings (
+            id TEXT PRIMARY KEY,
+            url TEXT NOT NULL,
+            from_user TEXT REFERENCES users(id) ON DELETE SET NULL,
+            to_user TEXT REFERENCES users(id) ON DELETE SET NULL,
+            room_id TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+    `);
+
+    // Приведение JSON-полей к корректному формату
     await pool.query(`
         UPDATE users SET 
-            topics = '[]'::jsonb WHERE topics IS NULL OR topics::text NOT LIKE '[%' AND topics::text NOT LIKE '{%';
-        UPDATE users SET 
-            schedule = '{}'::jsonb WHERE schedule IS NULL OR schedule::text NOT LIKE '{%' AND schedule::text NOT LIKE '[%';
-        UPDATE users SET 
-            certificates = '[]'::jsonb WHERE certificates IS NULL OR certificates::text NOT LIKE '[%';
-        UPDATE users SET 
-            appointments = '[]'::jsonb WHERE appointments IS NULL OR appointments::text NOT LIKE '[%';
-        UPDATE users SET 
-            clients = '[]'::jsonb WHERE clients IS NULL OR clients::text NOT LIKE '[%';
-        UPDATE users SET 
-            notifications = '[]'::jsonb WHERE notifications IS NULL OR notifications::text NOT LIKE '[%';
-        UPDATE users SET 
-            unread_counts = '{}'::jsonb WHERE unread_counts IS NULL OR unread_counts::text NOT LIKE '{%';
+            topics = COALESCE(topics, '[]'::jsonb),
+            schedule = COALESCE(schedule, '{}'::jsonb),
+            certificates = COALESCE(certificates, '[]'::jsonb),
+            appointments = COALESCE(appointments, '[]'::jsonb),
+            clients = COALESCE(clients, '[]'::jsonb),
+            notifications = COALESCE(notifications, '[]'::jsonb),
+            unread_counts = COALESCE(unread_counts, '{}'::jsonb);
     `);
-    console.log('✅ База данных инициализирована (JSON поля приведены к норме)');
+    console.log('✅ База данных инициализирована');
 }
 
 // ----------------------------------------------------------------------
-// РЕГИСТРАЦИЯ И АВТОРИЗАЦИЯ
+// API маршруты
 // ----------------------------------------------------------------------
+
+// Регистрация
 app.post('/api/register', async (req, res) => {
     try {
         const { fullName, email, phone, password, role, specialization, experience, about } = req.body;
@@ -176,26 +281,22 @@ app.post('/api/register', async (req, res) => {
         }
         const id = Date.now().toString();
         const createdAt = new Date().toISOString();
+        const avatar = `https://ui-avatars.com/api/?background=8bca8b&color=fff&name=${encodeURIComponent(fullName)}&size=128`;
         const newUser = {
             id, fullName, email, phone: phone || '', password, role,
             specialization: specialization || '', experience: experience || '', about: about || '',
-            price: 0, rating: 0,
-            avatar: `https://ui-avatars.com/api/?background=8bca8b&color=fff&name=${encodeURIComponent(fullName)}&size=128`,
-            createdAt,
-            topics: [], schedule: {}, certificates: [], appointments: [], clients: [], notifications: [], unreadCounts: {}
+            price: 0, rating: 0, avatar,
+            createdAt, topics: [], schedule: {}, certificates: [], appointments: [], clients: [], notifications: [], unreadCounts: {}
         };
-        
         await pool.query(
             `INSERT INTO users (id, full_name, email, phone, password, role, specialization, experience, about, price, topics, schedule, certificates, rating, avatar, appointments, clients, notifications, unread_counts, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
-            [
-                newUser.id, newUser.fullName, newUser.email, newUser.phone, newUser.password,
-                newUser.role, newUser.specialization, newUser.experience, newUser.about, newUser.price,
-                JSON.stringify(newUser.topics), JSON.stringify(newUser.schedule), JSON.stringify(newUser.certificates),
-                newUser.rating, newUser.avatar,
-                JSON.stringify(newUser.appointments), JSON.stringify(newUser.clients),
-                JSON.stringify(newUser.notifications), JSON.stringify(newUser.unreadCounts), newUser.createdAt
-            ]
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+            [newUser.id, newUser.fullName, newUser.email, newUser.phone, newUser.password, newUser.role,
+             newUser.specialization, newUser.experience, newUser.about, newUser.price,
+             JSON.stringify(newUser.topics), JSON.stringify(newUser.schedule), JSON.stringify(newUser.certificates),
+             newUser.rating, newUser.avatar,
+             JSON.stringify(newUser.appointments), JSON.stringify(newUser.clients),
+             JSON.stringify(newUser.notifications), JSON.stringify(newUser.unreadCounts), newUser.createdAt]
         );
         res.json({ success: true, userId: id, role });
     } catch (err) {
@@ -204,6 +305,7 @@ app.post('/api/register', async (req, res) => {
     }
 });
 
+// Логин
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -219,6 +321,7 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// Получение пользователя
 app.get('/api/user/:id', async (req, res) => {
     try {
         const user = await getUser(req.params.id);
@@ -231,12 +334,12 @@ app.get('/api/user/:id', async (req, res) => {
     }
 });
 
+// Обновление профиля
 app.put('/api/user/profile', upload.single('avatar'), async (req, res) => {
     try {
         const { userId, fullName, phone, about, specialization, experience, price, topics, avatar } = req.body;
         const user = await getUser(userId);
         if (!user) return res.json({ success: false, error: 'Пользователь не найден' });
-        
         if (fullName) user.fullName = fullName;
         if (phone) user.phone = phone;
         if (about) user.about = about;
@@ -246,7 +349,6 @@ app.put('/api/user/profile', upload.single('avatar'), async (req, res) => {
         if (topics) user.topics = typeof topics === 'string' ? JSON.parse(topics) : topics;
         if (req.file) user.avatar = `/uploads/images/${req.file.filename}`;
         else if (avatar) user.avatar = avatar;
-        
         await updateUser(user);
         const { password, ...safeUser } = user;
         res.json({ success: true, user: safeUser });
@@ -256,6 +358,7 @@ app.put('/api/user/profile', upload.single('avatar'), async (req, res) => {
     }
 });
 
+// Расписание
 app.put('/api/schedule', async (req, res) => {
     try {
         const { userId, schedule } = req.body;
@@ -270,29 +373,31 @@ app.put('/api/schedule', async (req, res) => {
     }
 });
 
-// ----------------------------------------------------------------------
-// ЗАГРУЗКА ФАЙЛОВ
-// ----------------------------------------------------------------------
+// Загрузка аватара
 app.post('/api/upload-avatar', upload.single('avatar'), (req, res) => {
     if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
     res.json({ success: true, avatarUrl: `/uploads/images/${req.file.filename}` });
 });
 
+// Общая загрузка файлов
 app.post('/api/upload', upload.single('file'), (req, res) => {
     if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
     res.json({ success: true, fileUrl: `/uploads/files/${req.file.filename}` });
 });
 
+// Загрузка изображения для чата
 app.post('/api/upload-chat-image', upload.single('image'), (req, res) => {
     if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
     res.json({ success: true, imageUrl: `/uploads/images/${req.file.filename}` });
 });
 
+// Загрузка голосового сообщения
 app.post('/api/upload-voice', upload.single('voice'), (req, res) => {
     if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
     res.json({ success: true, voiceUrl: `/uploads/audio/${req.file.filename}` });
 });
 
+// Загрузка записи звонка
 app.post('/api/upload-recording', upload.single('recording'), async (req, res) => {
     if (!req.file) return res.json({ success: false, error: 'Файл не загружен' });
     const recording = {
@@ -304,15 +409,13 @@ app.post('/api/upload-recording', upload.single('recording'), async (req, res) =
         created_at: new Date().toISOString()
     };
     await pool.query(
-        `INSERT INTO recordings (id, url, from_user, to_user, room_id, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+        `INSERT INTO recordings (id, url, from_user, to_user, room_id, created_at) VALUES ($1,$2,$3,$4,$5,$6)`,
         [recording.id, recording.url, recording.from_user, recording.to_user, recording.room_id, recording.created_at]
     );
     res.json({ success: true, recordingUrl: recording.url });
 });
 
-// ----------------------------------------------------------------------
-// СЕРТИФИКАТЫ
-// ----------------------------------------------------------------------
+// Сертификаты
 app.post('/api/certificates', upload.single('certificate'), async (req, res) => {
     try {
         const { userId, title } = req.body;
@@ -326,7 +429,7 @@ app.post('/api/certificates', upload.single('certificate'), async (req, res) => 
             image: `/uploads/certificates/${req.file.filename}`,
             created_at: new Date().toISOString()
         };
-        await pool.query(`INSERT INTO certificates (id, user_id, title, image, created_at) VALUES ($1, $2, $3, $4, $5)`,
+        await pool.query(`INSERT INTO certificates (id, user_id, title, image, created_at) VALUES ($1,$2,$3,$4,$5)`,
             [newCert.id, newCert.user_id, newCert.title, newCert.image, newCert.created_at]);
         if (!user.certificates) user.certificates = [];
         user.certificates.push({ id: newCert.id, title: newCert.title, image: newCert.image });
@@ -344,10 +447,8 @@ app.delete('/api/certificates/:userId/:certId', async (req, res) => {
         const user = await getUser(req.params.userId);
         if (!user) return res.json({ success: false });
         await pool.query('DELETE FROM certificates WHERE id = $1', [req.params.certId]);
-        if (user.certificates) {
-            user.certificates = user.certificates.filter(c => c.id !== req.params.certId);
-            await updateUser(user);
-        }
+        user.certificates = user.certificates.filter(c => c.id !== req.params.certId);
+        await updateUser(user);
         const { password, ...safeUser } = user;
         res.json({ success: true, user: safeUser });
     } catch (err) {
@@ -355,14 +456,13 @@ app.delete('/api/certificates/:userId/:certId', async (req, res) => {
     }
 });
 
-// ----------------------------------------------------------------------
-// ПОСТЫ
-// ----------------------------------------------------------------------
+// Посты
 app.post('/api/posts', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'video', maxCount: 1 }]), async (req, res) => {
     try {
         const { authorId, text } = req.body;
         const author = await getUser(authorId);
         if (!author || author.role !== 'psychologist') return res.json({ success: false, error: 'Только психологи могут создавать посты' });
+        if (!text.trim()) return res.json({ success: false, error: 'Текст поста обязателен' });
         const imageFile = req.files?.image?.[0];
         const videoFile = req.files?.video?.[0];
         const newPost = {
@@ -373,7 +473,7 @@ app.post('/api/posts', upload.fields([{ name: 'image', maxCount: 1 }, { name: 'v
             video: videoFile ? `/uploads/videos/${videoFile.filename}` : null,
             created_at: new Date().toISOString()
         };
-        await pool.query(`INSERT INTO posts (id, author_id, text, image, video, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+        await pool.query(`INSERT INTO posts (id, author_id, text, image, video, created_at) VALUES ($1,$2,$3,$4,$5,$6)`,
             [newPost.id, newPost.author_id, newPost.text, newPost.image, newPost.video, newPost.created_at]);
         io.emit('post_created', newPost);
         res.json({ success: true, post: newPost });
@@ -464,9 +564,7 @@ app.delete('/api/posts/:id', async (req, res) => {
     }
 });
 
-// ----------------------------------------------------------------------
-// КОММЕНТАРИИ (сокращённо, но полностью)
-// ----------------------------------------------------------------------
+// Комментарии
 app.post('/api/posts/:id/comment', async (req, res) => {
     try {
         const { userId, text } = req.body;
@@ -478,7 +576,7 @@ app.post('/api/posts/:id/comment', async (req, res) => {
             text,
             created_at: new Date().toISOString()
         };
-        await pool.query(`INSERT INTO comments (id, post_id, author_id, text, created_at) VALUES ($1, $2, $3, $4, $5)`,
+        await pool.query(`INSERT INTO comments (id, post_id, author_id, text, created_at) VALUES ($1,$2,$3,$4,$5)`,
             [newComment.id, newComment.post_id, newComment.author_id, newComment.text, newComment.created_at]);
         const author = await getUser(userId);
         const commentWithAuthor = { ...newComment, author: { id: author.id, fullName: author.fullName, avatar: author.avatar } };
@@ -522,9 +620,7 @@ app.delete('/api/comments/:id', async (req, res) => {
     }
 });
 
-// ----------------------------------------------------------------------
-// ЛАЙКИ
-// ----------------------------------------------------------------------
+// Лайки
 app.post('/api/posts/:id/like', async (req, res) => {
     try {
         const { userId } = req.body;
@@ -537,7 +633,7 @@ app.post('/api/posts/:id/like', async (req, res) => {
             io.emit('post_liked', { postId, likesCount, userId, liked: false });
             res.json({ success: true, liked: false, likesCount });
         } else {
-            await pool.query(`INSERT INTO likes (id, post_id, user_id, created_at) VALUES ($1, $2, $3, $4)`,
+            await pool.query(`INSERT INTO likes (id, post_id, user_id, created_at) VALUES ($1,$2,$3,$4)`,
                 [Date.now().toString(), postId, userId, new Date().toISOString()]);
             const countRes = await pool.query('SELECT COUNT(*) FROM likes WHERE post_id = $1', [postId]);
             const likesCount = parseInt(countRes.rows[0].count);
@@ -550,9 +646,7 @@ app.post('/api/posts/:id/like', async (req, res) => {
     }
 });
 
-// ----------------------------------------------------------------------
-// ЗАПИСИ НА ПРИЁМ (сокращённо, рабочий блок)
-// ----------------------------------------------------------------------
+// Запись к психологу
 app.post('/api/appointment', async (req, res) => {
     try {
         const { clientId, psychologistId, date, time } = req.body;
@@ -561,6 +655,7 @@ app.post('/api/appointment', async (req, res) => {
         if (!client || !psychologist) return res.json({ success: false, error: 'Пользователь не найден' });
         const daySchedule = psychologist.schedule?.[date];
         if (!daySchedule || !daySchedule.includes(time)) return res.json({ success: false, error: 'Это время уже занято' });
+        // Удаляем выбранное время из расписания
         psychologist.schedule[date] = daySchedule.filter(t => t !== time);
         if (psychologist.schedule[date].length === 0) delete psychologist.schedule[date];
         await updateUser(psychologist);
@@ -575,16 +670,18 @@ app.post('/api/appointment', async (req, res) => {
         };
         await pool.query(
             `INSERT INTO appointments (id, psychologist_id, client_id, psychologist_name, client_name, date, time, room_id, status, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
             [appointment.id, appointment.psychologist_id, appointment.client_id, appointment.psychologist_name,
              appointment.client_name, appointment.date, appointment.time, appointment.room_id, appointment.status, appointment.created_at]
         );
+        // Обновляем JSON-поля у пользователей
         if (!client.appointments) client.appointments = [];
         client.appointments.push(appointment);
         if (!psychologist.clients) psychologist.clients = [];
         psychologist.clients.push({ clientId, clientName: client.fullName, appointmentId: appointment.id, date, time, status: 'pending', roomId });
         await updateUser(client);
         await updateUser(psychologist);
+        // Уведомление психологу
         const notification = {
             id: Date.now().toString(),
             type: 'new_appointment',
@@ -621,6 +718,7 @@ app.post('/api/appointment/confirm', async (req, res) => {
             if (a) a.status = 'confirmed';
             await updateUser(client);
         }
+        // Удаляем уведомление о заявке
         if (psychologist && psychologist.notifications) {
             psychologist.notifications = psychologist.notifications.filter(n => n.appointmentId !== appointmentId);
             await updateUser(psychologist);
@@ -674,9 +772,7 @@ app.post('/api/appointment/complete', async (req, res) => {
     }
 });
 
-// ----------------------------------------------------------------------
-// ЗАДАЧИ, ЗАМЕТКИ, ОТЗЫВЫ, ПОИСК, ПОДПИСКИ (шаблонно, но рабочие)
-// ----------------------------------------------------------------------
+// Задачи
 app.get('/api/tasks/:psychologistId', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM tasks WHERE psychologist_id = $1 ORDER BY created_at DESC', [req.params.psychologistId]);
@@ -690,7 +786,7 @@ app.post('/api/tasks', async (req, res) => {
     try {
         const { psychologistId, text, dueDate } = req.body;
         const newTask = { id: Date.now().toString(), psychologist_id: psychologistId, text, due_date: dueDate || null, completed: false, created_at: new Date().toISOString() };
-        await pool.query(`INSERT INTO tasks (id, psychologist_id, text, due_date, completed, created_at) VALUES ($1, $2, $3, $4, $5, $6)`, [newTask.id, newTask.psychologist_id, newTask.text, newTask.due_date, newTask.completed, newTask.created_at]);
+        await pool.query(`INSERT INTO tasks (id, psychologist_id, text, due_date, completed, created_at) VALUES ($1,$2,$3,$4,$5,$6)`, [newTask.id, newTask.psychologist_id, newTask.text, newTask.due_date, newTask.completed, newTask.created_at]);
         res.json({ success: true, task: newTask });
     } catch (err) { res.json({ success: false }); }
 });
@@ -701,6 +797,7 @@ app.delete('/api/tasks/:taskId', async (req, res) => {
     try { await pool.query('DELETE FROM tasks WHERE id=$1', [req.params.taskId]); res.json({ success: true }); } catch(e) { res.json({ success: false }); }
 });
 
+// Заметки
 app.get('/api/notes/:psychologistId', async (req, res) => {
     try { const result = await pool.query('SELECT * FROM notes WHERE psychologist_id = $1 ORDER BY created_at DESC', [req.params.psychologistId]); res.json({ success: true, notes: result.rows }); } catch(e) { res.json({ success: false }); }
 });
@@ -709,6 +806,7 @@ app.post('/api/notes', async (req, res) => {
 });
 app.delete('/api/notes/:noteId', async (req, res) => { try { await pool.query('DELETE FROM notes WHERE id=$1', [req.params.noteId]); res.json({ success: true }); } catch(e) { res.json({ success: false }); } });
 
+// Отзывы
 app.post('/api/reviews', async (req, res) => {
     try {
         const { psychologistId, clientId, rating, text } = req.body;
@@ -723,12 +821,8 @@ app.post('/api/reviews', async (req, res) => {
         await pool.query(`INSERT INTO reviews (id, psychologist_id, client_id, client_name, rating, text, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [newReview.id, newReview.psychologist_id, newReview.client_id, newReview.client_name, newReview.rating, newReview.text, newReview.created_at]);
         const reviewsRes = await pool.query('SELECT rating FROM reviews WHERE psychologist_id=$1', [psychologistId]);
         let avgRating = 0;
-        if (reviewsRes.rows.length) avgRating = reviewsRes.rows.reduce((s,r)=>s+r.rating,0)/reviewsRes.rows.length;
-        const postsRes = await pool.query('SELECT id FROM posts WHERE author_id=$1', [psychologist.id]);
-        let totalLikes = 0;
-        for (const p of postsRes.rows) { const likesRes = await pool.query('SELECT COUNT(*) FROM likes WHERE post_id=$1', [p.id]); totalLikes += parseInt(likesRes.rows[0].count); }
-        const bonus = Math.min(1, totalLikes * 0.01);
-        psychologist.rating = Math.min(5, avgRating + bonus);
+        if (reviewsRes.rows.length > 0) avgRating = reviewsRes.rows.reduce((sum,r)=>sum+r.rating,0)/reviewsRes.rows.length;
+        psychologist.rating = Math.min(5, avgRating);
         await updateUser(psychologist);
         res.json({ success: true, review: newReview, newRating: psychologist.rating });
     } catch(err) { console.error(err); res.json({ success: false }); }
@@ -737,10 +831,12 @@ app.get('/api/reviews/:psychologistId', async (req, res) => {
     try { const result = await pool.query('SELECT * FROM reviews WHERE psychologist_id=$1 ORDER BY created_at DESC', [req.params.psychologistId]); res.json({ success: true, reviews: result.rows }); } catch(e) { res.json({ success: false }); }
 });
 
+// Поиск психологов
 app.get('/api/search/psychologists', async (req, res) => {
     try { const query = req.query.q?.toLowerCase() || ''; const result = await pool.query(`SELECT id, full_name, avatar, specialization, rating FROM users WHERE role='psychologist' AND LOWER(full_name) LIKE $1`, [`%${query}%`]); res.json({ success: true, psychologists: result.rows }); } catch(e) { res.json({ success: false }); }
 });
 
+// Подписки
 app.get('/api/subscriptions/:userId', async (req, res) => {
     try { const followingRes = await pool.query('SELECT following_id FROM subscriptions WHERE follower_id=$1', [req.params.userId]); const followersRes = await pool.query('SELECT follower_id FROM subscriptions WHERE following_id=$1', [req.params.userId]); res.json({ success: true, following: followingRes.rows.map(r=>r.following_id), followers: followersRes.rows.map(r=>r.follower_id) }); } catch(e) { res.json({ success: false }); }
 });
@@ -748,21 +844,32 @@ app.post('/api/subscriptions', async (req, res) => {
     try { const { followerId, followingId } = req.body; const existing = await pool.query('SELECT 1 FROM subscriptions WHERE follower_id=$1 AND following_id=$2', [followerId, followingId]); if (existing.rows.length) { await pool.query('DELETE FROM subscriptions WHERE follower_id=$1 AND following_id=$2', [followerId, followingId]); res.json({ success: true, subscribed: false }); } else { await pool.query(`INSERT INTO subscriptions (id, follower_id, following_id, created_at) VALUES ($1,$2,$3,$4)`, [Date.now().toString(), followerId, followingId, new Date().toISOString()]); res.json({ success: true, subscribed: true }); } } catch(e) { res.json({ success: false }); }
 });
 
-// ----------------------------------------------------------------------
-// ЧАТ
-// ----------------------------------------------------------------------
+// Сообщения и чаты
 app.get('/api/messages/:userId', async (req, res) => {
     try {
         const userId = req.params.userId;
         const user = await getUser(userId);
         if (!user) return res.json({ success: false });
-        const contactIds = user.role === 'client'
-            ? (await pool.query('SELECT id FROM users WHERE role=$1', ['psychologist'])).rows.map(r=>r.id)
-            : [...new Set([...(await pool.query('SELECT id FROM users WHERE role=$1 AND id!=$2', ['psychologist', userId])).rows.map(r=>r.id), ...(user.clients?.map(c=>c.clientId)||[])])];
         const messagesRes = await pool.query('SELECT * FROM messages WHERE from_user=$1 OR to_user=$1 ORDER BY created_at ASC', [userId]);
         const messages = messagesRes.rows;
+        // Собираем уникальных собеседников
+        const contactIds = new Set();
+        for (const msg of messages) {
+            if (msg.from_user === userId) contactIds.add(msg.to_user);
+            else contactIds.add(msg.from_user);
+        }
+        // Если психолог, добавляем клиентов из подтверждённых записей
+        if (user.role === 'psychologist' && Array.isArray(user.clients)) {
+            for (const c of user.clients) {
+                if (c.clientId) contactIds.add(c.clientId);
+            }
+        }
+        // Загружаем данные о контактах
         const contacts = [];
-        for (const id of contactIds) { const u = await getUser(id); if (u) contacts.push({ id: u.id, fullName: u.fullName, avatar: u.avatar, role: u.role }); }
+        for (const id of contactIds) {
+            const u = await getUser(id);
+            if (u) contacts.push({ id: u.id, fullName: u.fullName, avatar: u.avatar, role: u.role });
+        }
         res.json({ success: true, messages, users: contacts });
     } catch(err) { console.error(err); res.json({ success: false }); }
 });
@@ -797,12 +904,13 @@ app.post('/api/messages/read', async (req, res) => {
     } catch(err) { console.error(err); res.json({ success: false }); }
 });
 
+// Список всех психологов
 app.get('/api/psychologists', async (req, res) => {
     try { const result = await pool.query('SELECT id, full_name, avatar, specialization, rating, price FROM users WHERE role=$1', ['psychologist']); res.json({ success: true, psychologists: result.rows }); } catch(e) { res.json({ success: false }); }
 });
 
 // ----------------------------------------------------------------------
-// WEBRTC
+// WebRTC (Socket.IO)
 // ----------------------------------------------------------------------
 const activeRooms = new Map();
 io.on('connection', (socket) => {
@@ -901,7 +1009,6 @@ io.on('connection', (socket) => {
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
-// Запуск сервера и инициализация БД
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', async () => {
     console.log(`✅ Сервер запущен на порту ${PORT}`);
