@@ -2,415 +2,617 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
     <title>Видеозвонок | Therapy Call</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Inter', sans-serif; background: #0a0f0a; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
-        .call-container { width: 100%; max-width: 1400px; }
-        .call-layout { display: flex; gap: 20px; }
-        .video-section { flex: 3; }
-        .chat-section { width: 320px; background: rgba(30,35,32,0.4); backdrop-filter: blur(20px); border-radius: 24px; display: flex; flex-direction: column; height: 600px; border: 1px solid rgba(139,202,139,0.2); }
-        .chat-header { padding: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
-        .chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-        .chat-message { max-width: 85%; padding: 8px 12px; border-radius: 16px; font-size: 13px; word-wrap: break-word; }
-        .chat-message.outgoing { align-self: flex-end; background: #8bca8b; color: #1a3c2c; border-bottom-right-radius: 4px; }
-        .chat-message.incoming { align-self: flex-start; background: rgba(255,255,255,0.1); border-bottom-left-radius: 4px; }
-        .chat-message-time { font-size: 9px; opacity: 0.6; margin-top: 4px; }
-        .chat-input { display: flex; gap: 10px; padding: 12px; border-top: 1px solid rgba(255,255,255,0.1); }
-        .chat-input input { flex: 1; padding: 10px 14px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05); color: white; font-size: 14px; outline: none; }
-        .chat-input button { background: #8bca8b; border: none; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; color: #1a3c2c; }
-        .video-container { display: flex; gap: 20px; margin-bottom: 20px; }
-        .video-wrapper { flex: 1; position: relative; background: #000; border-radius: 24px; overflow: hidden; aspect-ratio: 4/3; border: 1px solid rgba(139,202,139,0.3); }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        .video-label { position: absolute; bottom: 12px; left: 12px; background: rgba(0,0,0,0.6); backdrop-filter: blur(10px); padding: 4px 12px; border-radius: 20px; font-size: 12px; }
-        .waiting-message { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: white; }
-        .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #8bca8b; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 12px; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .controls { display: flex; justify-content: center; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
-        .control-btn { width: 60px; height: 60px; border-radius: 50%; border: none; background: rgba(30,35,32,0.8); backdrop-filter: blur(10px); cursor: pointer; font-size: 24px; transition: all 0.3s; color: white; border: 1px solid rgba(139,202,139,0.3); }
-        .control-btn:hover { transform: scale(1.1); background: rgba(139,202,139,0.3); }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0a0f0a;
+            min-height: 100vh;
+            overflow: hidden;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+        }
+        .call-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+        /* Большое видео (собеседник) */
+        .remote-video-wrapper {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #remoteVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        /* Маленькое плавающее видео (своё) */
+        .local-video-wrapper {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 120px;
+            height: 160px;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 2px solid rgba(139,202,139,0.6);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 10;
+            cursor: pointer;
+            transition: 0.2s;
+            background: #000;
+        }
+        .local-video-wrapper:hover {
+            transform: scale(1.02);
+            border-color: #8bca8b;
+        }
+        #localVideo {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        /* Элементы управления */
+        .controls {
+            position: absolute;
+            bottom: 30px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            z-index: 20;
+            flex-wrap: wrap;
+            padding: 12px;
+            background: linear-gradient(to top, rgba(0,0,0,0.6), transparent);
+        }
+        .control-btn {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(30,35,32,0.8);
+            backdrop-filter: blur(10px);
+            cursor: pointer;
+            font-size: 24px;
+            transition: all 0.2s;
+            color: white;
+            border: 1px solid rgba(139,202,139,0.3);
+        }
+        .control-btn:hover {
+            transform: scale(1.05);
+            background: rgba(139,202,139,0.3);
+        }
         .end-call { background: rgba(220,38,38,0.8); }
         .end-call:hover { background: #dc2626; }
-        .reconnect-btn { background: rgba(245,158,11,0.8); }
-        .reconnect-btn:hover { background: #f59e0b; }
-        .control-btn.muted { background: #f59e0b; }
         .recording-active { background: #dc2626 !important; animation: pulse 1s infinite; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-        .recording-indicator { position: fixed; top: 20px; right: 20px; background: #dc2626; color: white; padding: 6px 12px; border-radius: 30px; font-size: 12px; display: none; align-items: center; gap: 8px; z-index: 100; }
-        .recording-indicator.show { display: flex; }
-        .call-info { text-align: center; padding: 10px 20px; background: rgba(30,35,32,0.6); backdrop-filter: blur(10px); border-radius: 40px; display: inline-block; width: auto; margin: 0 auto; font-size: 14px; border: 1px solid rgba(139,202,139,0.2); }
-        #connection-status { position: fixed; bottom: 20px; right: 20px; background: rgba(0,0,0,0.7); backdrop-filter: blur(10px); padding: 8px 16px; border-radius: 30px; font-size: 12px; font-family: monospace; cursor: pointer; z-index: 1000; border: 1px solid rgba(139,202,139,0.3); }
-        .restart-btn { background: #f59e0b; margin-left: 8px; }
-        
-        /* Мобильная адаптация */
-        @media (max-width: 768px) {
-            body { padding: 12px; }
-            .call-layout { flex-direction: column; gap: 12px; }
-            .chat-section { width: 100%; height: 280px; order: 2; }
-            .video-section { order: 1; }
-            .video-container { flex-direction: column; gap: 12px; }
-            .video-wrapper { aspect-ratio: 16/9; }
-            .controls { gap: 12px; }
-            .control-btn { width: 50px; height: 50px; font-size: 20px; }
-            .chat-messages { padding: 12px; }
-            .chat-message { max-width: 90%; font-size: 12px; }
-            .chat-input input { font-size: 13px; padding: 8px 12px; }
-            .call-info { font-size: 11px; padding: 6px 12px; }
-            #connection-status { font-size: 10px; bottom: 10px; right: 10px; }
-            .recording-indicator { top: 10px; right: 10px; font-size: 10px; padding: 4px 10px; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .chat-toggle-btn {
+            background: rgba(139,202,139,0.3);
         }
-        
-        @media (max-width: 480px) {
-            .control-btn { width: 44px; height: 44px; font-size: 18px; }
-            .chat-section { height: 250px; }
-            .chat-message { max-width: 95%; }
+        /* Панель чата (выдвижная) */
+        .chat-panel {
+            position: absolute;
+            bottom: 100px;
+            right: 20px;
+            width: 320px;
+            max-width: calc(100vw - 40px);
+            background: rgba(20,26,22,0.95);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            border: 1px solid rgba(139,202,139,0.3);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transform: translateX(120%);
+            transition: transform 0.3s ease;
+            z-index: 25;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        }
+        .chat-panel.open {
+            transform: translateX(0);
+        }
+        .chat-header {
+            padding: 14px 16px;
+            background: rgba(0,0,0,0.5);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+        }
+        .chat-messages {
+            height: 300px;
+            overflow-y: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .chat-message {
+            max-width: 85%;
+            padding: 8px 12px;
+            border-radius: 18px;
+            font-size: 13px;
+            word-wrap: break-word;
+        }
+        .chat-message.outgoing {
+            align-self: flex-end;
+            background: #8bca8b;
+            color: #0d2010;
+            border-bottom-right-radius: 4px;
+        }
+        .chat-message.incoming {
+            align-self: flex-start;
+            background: rgba(255,255,255,0.1);
+            border-bottom-left-radius: 4px;
+        }
+        .chat-message-time {
+            font-size: 9px;
+            opacity: 0.6;
+            margin-top: 4px;
+        }
+        .chat-input-area {
+            display: flex;
+            gap: 8px;
+            padding: 12px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            background: rgba(0,0,0,0.3);
+        }
+        .chat-input-area input {
+            flex: 1;
+            padding: 10px 14px;
+            border-radius: 30px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.05);
+            color: white;
+            font-size: 13px;
+            outline: none;
+        }
+        .chat-input-area button {
+            background: #8bca8b;
+            border: none;
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            cursor: pointer;
+            color: #0d2010;
+        }
+        .connection-status {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(10px);
+            padding: 6px 12px;
+            border-radius: 30px;
+            font-size: 12px;
+            z-index: 15;
+            font-family: monospace;
+            color: #8bca8b;
+        }
+        .waiting-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            background: rgba(0,0,0,0.5);
+            padding: 16px 24px;
+            border-radius: 40px;
+            backdrop-filter: blur(10px);
+            z-index: 5;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(255,255,255,0.2);
+            border-top-color: #8bca8b;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-width: 640px) {
+            .local-video-wrapper { width: 90px; height: 120px; bottom: 80px; right: 12px; }
+            .control-btn { width: 48px; height: 48px; font-size: 20px; }
+            .chat-panel { width: calc(100vw - 24px); right: 12px; bottom: 100px; }
+            .chat-messages { height: 260px; }
         }
     </style>
 </head>
 <body>
-    <div class="call-container">
-        <div class="recording-indicator" id="recordingIndicator">
-            <i class="fas fa-circle" style="font-size: 10px;"></i> Запись...
-        </div>
-        <div class="call-layout">
-            <div class="video-section">
-                <div class="video-container">
-                    <div class="video-wrapper">
-                        <video id="localVideo" autoplay muted playsinline></video>
-                        <div class="video-label">Вы</div>
-                    </div>
-                    <div class="video-wrapper">
-                        <video id="remoteVideo" autoplay playsinline></video>
-                        <div class="video-label">Собеседник</div>
-                        <div id="waitingMessage" class="waiting-message">
-                            <div class="spinner"></div>
-                            <p>Ожидание подключения...</p>
-                        </div>
-                    </div>
-                </div>
-                <div class="controls">
-                    <button id="toggleMic" class="control-btn" title="Микрофон"><i class="fas fa-microphone"></i></button>
-                    <button id="toggleCam" class="control-btn" title="Камера"><i class="fas fa-video"></i></button>
-                    <button id="recordBtn" class="control-btn" title="Запись звонка"><i class="fas fa-circle"></i></button>
-                    <button id="reconnectBtn" class="control-btn reconnect-btn" title="Переподключиться"><i class="fas fa-sync-alt"></i></button>
-                    <button id="endCall" class="control-btn end-call" title="Завершить"><i class="fas fa-phone-slash"></i></button>
-                </div>
-            </div>
-            <div class="chat-section">
-                <div class="chat-header"><span><i class="fas fa-comment"></i> Чат звонка</span></div>
-                <div class="chat-messages" id="chatMessages"><div style="text-align:center; opacity:0.5; padding:20px;">Чат для сообщений во время звонка</div></div>
-                <div class="chat-input">
-                    <input type="text" id="chatInput" placeholder="Сообщение...">
-                    <button id="sendChatBtn"><i class="fas fa-paper-plane"></i></button>
-                </div>
-            </div>
-        </div>
-        <div style="text-align: center; margin-top: 16px;">
-            <div class="call-info"><i class="fas fa-key"></i> Комната: <strong id="roomId"></strong></div>
+<div class="call-container">
+    <div class="remote-video-wrapper">
+        <video id="remoteVideo" autoplay playsinline></video>
+        <div id="waitingMessage" class="waiting-message" style="display: none;">
+            <div class="spinner"></div>
+            <p>Ожидание подключения...</p>
         </div>
     </div>
-    <div id="connection-status">📡 <span id="statusText">Подключение...</span></div>
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-        (function() {
-            let socket = null;
-            let localStream = null;
-            let peerConnection = null;
-            let currentRoomId = null;
-            let userRole = null;
-            let partnerSocketId = null;
-            let currentUserId = null;
-            let mediaRecorder = null;
-            let recordedChunks = [];
-            let isRecording = false;
-            let reconnectAttempts = 0;
-            const MAX_RECONNECT_ATTEMPTS = 3;
-            
-            const urlParams = new URLSearchParams(window.location.search);
-            currentRoomId = urlParams.get('room');
-            userRole = urlParams.get('role');
-            currentUserId = localStorage.getItem('userId');
-            
-            document.getElementById('roomId').textContent = currentRoomId;
-            
-            const localVideo = document.getElementById('localVideo');
-            const remoteVideo = document.getElementById('remoteVideo');
-            const waitingMessage = document.getElementById('waitingMessage');
-            const toggleMicBtn = document.getElementById('toggleMic');
-            const toggleCamBtn = document.getElementById('toggleCam');
-            const recordBtn = document.getElementById('recordBtn');
-            const reconnectBtn = document.getElementById('reconnectBtn');
-            const endCallBtn = document.getElementById('endCall');
-            const statusText = document.getElementById('statusText');
-            const chatMessages = document.getElementById('chatMessages');
-            const chatInput = document.getElementById('chatInput');
-            const sendChatBtn = document.getElementById('sendChatBtn');
-            const recordingIndicator = document.getElementById('recordingIndicator');
-            
-            function showToast(message, isError = false) {
-                const toast = document.createElement('div');
-                toast.style.cssText = `position:fixed; bottom:30px; left:50%; transform:translateX(-50%); background:rgba(30,35,32,0.95); backdrop-filter:blur(20px); border:1px solid ${isError ? '#dc2626' : '#8bca8b'}; border-radius:16px; padding:10px 20px; color:${isError ? '#ff6b6b' : '#8bca8b'}; font-size:13px; z-index:3000; white-space:nowrap; max-width:90%; white-space:normal; text-align:center;`;
-                toast.textContent = message;
-                document.body.appendChild(toast);
-                setTimeout(() => toast.remove(), 3000);
+    <div class="local-video-wrapper" id="localVideoWrapper">
+        <video id="localVideo" autoplay muted playsinline></video>
+    </div>
+
+    <div class="controls">
+        <button id="toggleMic" class="control-btn" title="Микрофон"><i class="fas fa-microphone"></i></button>
+        <button id="toggleCam" class="control-btn" title="Камера"><i class="fas fa-video"></i></button>
+        <button id="recordBtn" class="control-btn" title="Запись"><i class="fas fa-circle"></i></button>
+        <button id="chatToggleBtn" class="control-btn chat-toggle-btn" title="Чат"><i class="fas fa-comment"></i></button>
+        <button id="endCallBtn" class="control-btn end-call" title="Завершить"><i class="fas fa-phone-slash"></i></button>
+    </div>
+
+    <div id="connectionStatus" class="connection-status">📡 Подключение...</div>
+
+    <!-- Выдвижная панель чата -->
+    <div id="chatPanel" class="chat-panel">
+        <div class="chat-header">
+            <span><i class="fas fa-comment"></i> Чат звонка</span>
+            <button id="closeChatBtn" style="background:none; border:none; color:white; font-size:18px; cursor:pointer;">✕</button>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+            <div style="text-align:center; opacity:0.5; padding:20px;">Сообщения будут здесь</div>
+        </div>
+        <div class="chat-input-area">
+            <input type="text" id="chatInput" placeholder="Сообщение...">
+            <button id="sendChatBtn"><i class="fas fa-paper-plane"></i></button>
+        </div>
+    </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+    (function(){
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomId = urlParams.get('room');
+        let userRole = urlParams.get('role'); // 'psychologist' или 'client'
+        const currentUserId = localStorage.getItem('userId');
+
+        if (!roomId || !userRole || !currentUserId) {
+            alert('Ошибка: не все параметры звонка. Вернитесь на главную.');
+            window.location.href = '/';
+        }
+
+        // DOM элементы
+        const localVideo = document.getElementById('localVideo');
+        const remoteVideo = document.getElementById('remoteVideo');
+        const waitingMsg = document.getElementById('waitingMessage');
+        const statusDiv = document.getElementById('connectionStatus');
+        const toggleMicBtn = document.getElementById('toggleMic');
+        const toggleCamBtn = document.getElementById('toggleCam');
+        const recordBtn = document.getElementById('recordBtn');
+        const chatToggleBtn = document.getElementById('chatToggleBtn');
+        const closeChatBtn = document.getElementById('closeChatBtn');
+        const endCallBtn = document.getElementById('endCallBtn');
+        const chatPanel = document.getElementById('chatPanel');
+        const chatMessages = document.getElementById('chatMessages');
+        const chatInput = document.getElementById('chatInput');
+        const sendChatBtn = document.getElementById('sendChatBtn');
+        const localVideoWrapper = document.getElementById('localVideoWrapper');
+
+        let localStream = null;
+        let peerConnection = null;
+        let socket = null;
+        let partnerSocketId = null;
+        let isRecording = false;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let isLocalLarge = false; // false = локальное маленькое, true = локальное большое
+
+        function updateStatus(msg, isError = false) {
+            statusDiv.innerHTML = `📡 ${msg}`;
+            statusDiv.style.color = isError ? '#ff6b6b' : '#8bca8b';
+            console.log(msg);
+        }
+
+        function showToast(message, isError = false) {
+            const toast = document.createElement('div');
+            toast.style.cssText = `position:fixed; bottom:100px; left:50%; transform:translateX(-50%); background:rgba(30,35,32,0.95); backdrop-filter:blur(20px); border:1px solid ${isError ? '#dc2626' : '#8bca8b'}; border-radius:16px; padding:10px 20px; color:${isError ? '#ff6b6b' : '#8bca8b'}; font-size:13px; z-index:3000; white-space:nowrap; max-width:90%; text-align:center;`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        function escapeHtml(str) { return String(str || '').replace(/[&<>]/g, function(m){ if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m; }); }
+
+        function addChatMessage(text, isOutgoing = false, time = null) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `chat-message ${isOutgoing ? 'outgoing' : 'incoming'}`;
+            const timeStr = time ? new Date(time).toLocaleTimeString() : new Date().toLocaleTimeString();
+            msgDiv.innerHTML = `<div>${escapeHtml(text)}</div><div class="chat-message-time">${timeStr}</div>`;
+            chatMessages.appendChild(msgDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            if (chatMessages.querySelector('.empty-placeholder')) chatMessages.innerHTML = '';
+        }
+
+        async function getIceServers() {
+            return [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
+                { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+                { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+                { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+            ];
+        }
+
+        async function createPeerConnection() {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
             }
-            
-            function updateStatus(message, isError = false) {
-                statusText.textContent = message;
-                statusText.style.color = isError ? '#ff6b6b' : '#8bca8b';
-                console.log(`📡 ${message}`);
-            }
-            
-            function addChatMessage(text, isOutgoing = false, time = null) {
-                const messageDiv = document.createElement('div');
-                messageDiv.className = `chat-message ${isOutgoing ? 'outgoing' : 'incoming'}`;
-                const timeStr = time ? new Date(time).toLocaleTimeString() : new Date().toLocaleTimeString();
-                messageDiv.innerHTML = `<div>${escapeHtml(text)}</div><div class="chat-message-time">${timeStr}</div>`;
-                chatMessages.appendChild(messageDiv);
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-            }
-            
-            function escapeHtml(str) {
-                if (!str) return '';
-                return str.replace(/[&<>]/g, function(m) {
-                    if (m === '&') return '&amp;';
-                    if (m === '<') return '&lt;';
-                    if (m === '>') return '&gt;';
-                    return m;
-                });
-            }
-            
-            async function getIceServers() {
-                // Надёжные TURN-серверы от Metered.ca (бесплатно до 50GB/мес)
-                return [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:stun2.l.google.com:19302' },
-                    { urls: 'stun:stun3.l.google.com:19302' },
-                    { urls: 'stun:stun4.l.google.com:19302' },
-                    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-                    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-                    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-                ];
-            }
-            
-            async function createPeerConnection() {
-                if (peerConnection) {
-                    peerConnection.close();
-                    peerConnection = null;
-                }
-                const config = { iceServers: await getIceServers() };
-                peerConnection = new RTCPeerConnection(config);
+            const config = { iceServers: await getIceServers() };
+            peerConnection = new RTCPeerConnection(config);
+            if (localStream) {
                 localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-                peerConnection.ontrack = (event) => {
-                    updateStatus('✅ Видео получено!');
-                    remoteVideo.srcObject = event.streams[0];
-                    waitingMessage.style.display = 'none';
-                };
-                peerConnection.onicecandidate = (event) => {
-                    if (event.candidate && partnerSocketId) {
-                        socket.emit('ice-candidate', { target: partnerSocketId, candidate: event.candidate });
-                    }
-                };
-                peerConnection.oniceconnectionstatechange = () => {
-                    const state = peerConnection.iceConnectionState;
-                    if (state === 'connected') {
-                        updateStatus('✅ Соединение установлено!');
-                        reconnectAttempts = 0;
-                    }
-                    if (state === 'failed') {
-                        updateStatus('❌ ICE соединение не удалось', true);
-                        if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                            updateStatus('Попытка переподключения...');
-                            setTimeout(() => reconnect(), 2000);
-                        } else {
-                            updateStatus('Не удалось подключиться. Нажмите кнопку переподключения.', true);
-                        }
-                    }
-                };
-                return peerConnection;
             }
-            
-            async function initWebRTC(createOffer = true) {
-                if (!localStream) return;
-                await createPeerConnection();
-                if (createOffer && userRole === 'psychologist' && partnerSocketId) {
-                    const offer = await peerConnection.createOffer();
-                    await peerConnection.setLocalDescription(offer);
-                    socket.emit('offer', { target: partnerSocketId, sdp: offer });
-                }
-            }
-            
-            async function reconnect() {
-                if (isRecording) stopRecording();
-                updateStatus('Переподключение...');
-                reconnectAttempts++;
-                if (peerConnection) {
-                    peerConnection.close();
-                    peerConnection = null;
-                }
-                partnerSocketId = null;
-                waitingMessage.style.display = 'flex';
-                remoteVideo.srcObject = null;
-                // Заново запрашиваем партнёра через сокет
-                if (socket) {
-                    socket.emit('join-call-room', currentRoomId, currentUserId, userRole);
-                }
-            }
-            
-            async function startCall() {
-                try {
-                    updateStatus('Запрос камеры...');
-                    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                    localVideo.srcObject = localStream;
-                    updateStatus('Камера готова');
-                    socket = io();
-                    socket.on('connect', () => {
-                        updateStatus('Сервер подключен');
-                        socket.emit('join-call-room', currentRoomId, currentUserId, userRole);
-                    });
-                    socket.on('room-joined', () => updateStatus('Ожидание собеседника...'));
-                    socket.on('call-ready', async (data) => {
-                        updateStatus('Собеседник найден, установка соединения...');
-                        partnerSocketId = data.partnerId;
-                        await initWebRTC(true);
-                    });
-                    socket.on('offer', async (data) => {
-                        partnerSocketId = data.from;
-                        if (!peerConnection) await initWebRTC(false);
-                        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
-                        const answer = await peerConnection.createAnswer();
-                        await peerConnection.setLocalDescription(answer);
-                        socket.emit('answer', { target: partnerSocketId, sdp: answer });
-                    });
-                    socket.on('answer', async (data) => {
-                        if (peerConnection) {
-                            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
-                        }
-                    });
-                    socket.on('ice-candidate', async (data) => {
-                        if (peerConnection) {
-                            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-                        }
-                    });
-                    socket.on('call-message', (data) => {
-                        addChatMessage(data.text, false, data.time);
-                    });
-                    socket.on('call-ended', () => {
-                        updateStatus('Звонок завершен');
-                        if (isRecording) stopRecording();
-                        setTimeout(() => window.location.href = '/', 1500);
-                    });
-                    socket.on('partner-disconnected', () => {
-                        updateStatus('Собеседник отключился', true);
-                        alert('Собеседник отключился');
-                        window.location.href = '/';
-                    });
-                    
-                    sendChatBtn.onclick = () => {
-                        const text = chatInput.value.trim();
-                        if (!text || !partnerSocketId) return;
-                        addChatMessage(text, true);
-                        socket.emit('call-message', { text: text });
-                        chatInput.value = '';
-                    };
-                    chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChatBtn.click(); };
-                    reconnectBtn.onclick = () => reconnect();
-                } catch (error) {
-                    updateStatus('Нет доступа к камере', true);
-                    alert('Не удалось получить доступ к камере');
-                }
-            }
-            
-            async function startRecording() {
-                if (!localStream) return;
-                try {
-                    updateStatus('🎥 Начинаем запись...');
-                    recordedChunks = [];
-                    const audioContext = new AudioContext();
-                    const dest = audioContext.createMediaStreamDestination();
-                    const micTrack = localStream.getAudioTracks()[0];
-                    const micStream = new MediaStream([micTrack]);
-                    const micSource = audioContext.createMediaStreamSource(micStream);
-                    micSource.connect(dest);
-                    const recordingStream = new MediaStream([...dest.stream.getAudioTracks()]);
-                    mediaRecorder = new MediaRecorder(recordingStream, { mimeType: 'audio/webm' });
-                    mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0) recordedChunks.push(event.data);
-                    };
-                    mediaRecorder.onstop = async () => {
-                        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
-                        const formData = new FormData();
-                        formData.append('recording', blob, `recording-${Date.now()}.webm`);
-                        formData.append('from', currentUserId);
-                        formData.append('to', partnerSocketId || 'unknown');
-                        formData.append('roomId', currentRoomId);
-                        const res = await fetch('/api/upload-recording', { method: 'POST', body: formData });
-                        const data = await res.json();
-                        if (data.success) {
-                            updateStatus('✅ Запись сохранена!');
-                            showToast('Запись звонка сохранена');
-                        } else {
-                            updateStatus('❌ Ошибка сохранения записи', true);
-                        }
-                        audioContext.close();
-                    };
-                    mediaRecorder.start(1000);
-                    isRecording = true;
-                    recordBtn.classList.add('recording-active');
-                    recordingIndicator.classList.add('show');
-                    updateStatus('🔴 Идет запись звонка...');
-                } catch (err) {
-                    updateStatus('❌ Ошибка записи: ' + err.message, true);
-                    console.error(err);
-                }
-            }
-            
-            function stopRecording() {
-                if (mediaRecorder && mediaRecorder.state === 'recording') {
-                    mediaRecorder.stop();
-                    isRecording = false;
-                    recordBtn.classList.remove('recording-active');
-                    recordingIndicator.classList.remove('show');
-                    updateStatus('✅ Запись завершена');
-                }
-            }
-            
-            recordBtn.onclick = async () => {
-                if (isRecording) {
-                    stopRecording();
-                } else {
-                    await startRecording();
+            peerConnection.ontrack = (event) => {
+                updateStatus('Видео собеседника получено');
+                remoteVideo.srcObject = event.streams[0];
+                waitingMsg.style.display = 'none';
+            };
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate && partnerSocketId) {
+                    socket.emit('ice-candidate', { target: partnerSocketId, candidate: event.candidate });
                 }
             };
-            
+            peerConnection.oniceconnectionstatechange = () => {
+                const state = peerConnection.iceConnectionState;
+                if (state === 'connected') updateStatus('Соединение установлено');
+                else if (state === 'failed') updateStatus('Соединение разорвано', true);
+            };
+            return peerConnection;
+        }
+
+        async function initWebRTC(createOffer = true) {
+            if (!localStream) return;
+            await createPeerConnection();
+            if (createOffer && userRole === 'psychologist' && partnerSocketId) {
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                socket.emit('offer', { target: partnerSocketId, sdp: offer });
+                updateStatus('Отправка offer...');
+            }
+        }
+
+        async function startLocalStream() {
+            try {
+                updateStatus('Запрос камеры/микрофона...');
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+                updateStatus('Камера готова');
+                // после получения стрима, если уже есть партнёр, создаём соединение
+                if (partnerSocketId) await initWebRTC(userRole === 'psychologist');
+            } catch(e) {
+                updateStatus('Нет доступа к камере/микрофону', true);
+                showToast('Не удалось получить доступ к камере или микрофону', true);
+            }
+        }
+
+        function setupSocket() {
+            socket = io();
+            socket.on('connect', () => {
+                updateStatus('Соединение с сервером');
+                socket.emit('register_user', currentUserId);
+                socket.emit('join-call-room', roomId, currentUserId, userRole);
+            });
+            socket.on('room-joined', () => {
+                updateStatus('Ожидание собеседника...');
+                waitingMsg.style.display = 'flex';
+            });
+            socket.on('call-ready', async (data) => {
+                updateStatus('Собеседник найден, устанавливаем соединение...');
+                partnerSocketId = data.partnerId;
+                waitingMsg.style.display = 'none';
+                if (localStream) {
+                    await initWebRTC(userRole === 'psychologist');
+                } else {
+                    // ждём пока localStream будет готов
+                    const waitForStream = setInterval(async () => {
+                        if (localStream) {
+                            clearInterval(waitForStream);
+                            await initWebRTC(userRole === 'psychologist');
+                        }
+                    }, 200);
+                }
+            });
+            socket.on('offer', async (data) => {
+                partnerSocketId = data.from;
+                if (!peerConnection) await createPeerConnection();
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                socket.emit('answer', { target: partnerSocketId, sdp: answer });
+            });
+            socket.on('answer', async (data) => {
+                if (peerConnection) {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+                }
+            });
+            socket.on('ice-candidate', async (data) => {
+                if (peerConnection) {
+                    try {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    } catch(e) { console.warn('ICE add error', e); }
+                }
+            });
+            socket.on('call-message', (data) => {
+                addChatMessage(data.text, false, data.time);
+            });
+            socket.on('call-ended', () => {
+                updateStatus('Звонок завершён собеседником');
+                showToast('Звонок завершён');
+                setTimeout(() => window.location.href = '/', 1500);
+            });
+            socket.on('partner-disconnected', () => {
+                updateStatus('Собеседник отключился', true);
+                showToast('Собеседник покинул звонок', true);
+                setTimeout(() => window.location.href = '/', 2000);
+            });
+        }
+
+        // Отправка сообщения в чат
+        function sendChatMessage() {
+            const text = chatInput.value.trim();
+            if (!text || !partnerSocketId) return;
+            addChatMessage(text, true);
+            socket.emit('call-message', { text: text });
+            chatInput.value = '';
+        }
+
+        // Переключение размера видео (клик по маленькому)
+        function swapVideoSize() {
+            const remoteWrapper = document.querySelector('.remote-video-wrapper');
+            const localWrapper = document.querySelector('.local-video-wrapper');
+            if (!isLocalLarge) {
+                // делаем локальное большим
+                remoteWrapper.style.zIndex = '1';
+                localWrapper.style.zIndex = '2';
+                localWrapper.style.width = '100%';
+                localWrapper.style.height = '100%';
+                localWrapper.style.bottom = '0';
+                localWrapper.style.right = '0';
+                localWrapper.style.borderRadius = '0';
+                remoteWrapper.style.position = 'absolute';
+                remoteWrapper.style.bottom = '20px';
+                remoteWrapper.style.right = '20px';
+                remoteWrapper.style.width = '120px';
+                remoteWrapper.style.height = '160px';
+                remoteWrapper.style.borderRadius = '16px';
+                remoteWrapper.style.overflow = 'hidden';
+                remoteWrapper.style.border = '2px solid rgba(139,202,139,0.6)';
+                remoteWrapper.style.cursor = 'pointer';
+                isLocalLarge = true;
+            } else {
+                // возвращаем как было
+                remoteWrapper.style.zIndex = '1';
+                localWrapper.style.zIndex = '10';
+                localWrapper.style.width = '120px';
+                localWrapper.style.height = '160px';
+                localWrapper.style.bottom = '20px';
+                localWrapper.style.right = '20px';
+                localWrapper.style.borderRadius = '16px';
+                remoteWrapper.style.position = 'absolute';
+                remoteWrapper.style.inset = '0';
+                remoteWrapper.style.width = '100%';
+                remoteWrapper.style.height = '100%';
+                remoteWrapper.style.border = 'none';
+                remoteWrapper.style.bottom = 'auto';
+                remoteWrapper.style.right = 'auto';
+                remoteWrapper.style.borderRadius = '0';
+                remoteWrapper.style.cursor = 'default';
+                isLocalLarge = false;
+            }
+        }
+
+        // Запись звонка (аудио)
+        async function startRecording() {
+            if (!localStream) return;
+            try {
+                recordedChunks = [];
+                const audioContext = new AudioContext();
+                const dest = audioContext.createMediaStreamDestination();
+                const micTrack = localStream.getAudioTracks()[0];
+                const micStream = new MediaStream([micTrack]);
+                const micSource = audioContext.createMediaStreamSource(micStream);
+                micSource.connect(dest);
+                const recordingStream = new MediaStream([...dest.stream.getAudioTracks()]);
+                mediaRecorder = new MediaRecorder(recordingStream, { mimeType: 'audio/webm' });
+                mediaRecorder.ondataavailable = (event) => { if (event.data.size > 0) recordedChunks.push(event.data); };
+                mediaRecorder.onstop = async () => {
+                    const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+                    const fd = new FormData();
+                    fd.append('recording', blob, `call_recording_${Date.now()}.webm`);
+                    fd.append('from', currentUserId);
+                    fd.append('to', partnerSocketId || 'unknown');
+                    fd.append('roomId', roomId);
+                    await fetch('/api/upload-recording', { method: 'POST', body: fd });
+                    showToast('Запись сохранена');
+                    audioContext.close();
+                };
+                mediaRecorder.start(1000);
+                isRecording = true;
+                recordBtn.classList.add('recording-active');
+                recordBtn.innerHTML = '<i class="fas fa-stop"></i>';
+                updateStatus('🔴 Запись...');
+            } catch(e) { console.error(e); showToast('Ошибка записи', true); }
+        }
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                isRecording = false;
+                recordBtn.classList.remove('recording-active');
+                recordBtn.innerHTML = '<i class="fas fa-circle"></i>';
+                updateStatus('Запись завершена');
+            }
+        }
+
+        function endCall() {
+            if (socket) socket.emit('end-call');
+            if (isRecording) stopRecording();
+            window.location.href = '/';
+        }
+
+        // Инициализация
+        async function init() {
+            setupSocket();
+            await startLocalStream();
+
+            // Обработчики UI
             toggleMicBtn.onclick = () => {
                 if (localStream) {
-                    const track = localStream.getAudioTracks()[0];
-                    track.enabled = !track.enabled;
+                    const audioTrack = localStream.getAudioTracks()[0];
+                    audioTrack.enabled = !audioTrack.enabled;
                     toggleMicBtn.classList.toggle('muted');
                 }
             };
-            
             toggleCamBtn.onclick = () => {
                 if (localStream) {
-                    const track = localStream.getVideoTracks()[0];
-                    track.enabled = !track.enabled;
+                    const videoTrack = localStream.getVideoTracks()[0];
+                    videoTrack.enabled = !videoTrack.enabled;
                     toggleCamBtn.classList.toggle('muted');
                 }
             };
-            
-            endCallBtn.onclick = () => {
-                if (socket) socket.emit('end-call');
+            recordBtn.onclick = () => {
                 if (isRecording) stopRecording();
-                window.location.href = '/';
+                else startRecording();
             };
-            
-            startCall();
-        })();
-    </script>
+            endCallBtn.onclick = endCall;
+            sendChatBtn.onclick = sendChatMessage;
+            chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChatMessage(); };
+            chatToggleBtn.onclick = () => {
+                chatPanel.classList.toggle('open');
+            };
+            closeChatBtn.onclick = () => {
+                chatPanel.classList.remove('open');
+            };
+            localVideoWrapper.onclick = swapVideoSize;
+
+            // Убираем пустое сообщение при первом сообщении
+            setTimeout(() => {
+                if (chatMessages.children.length === 1 && chatMessages.children[0].innerText.includes('Сообщения будут здесь')) {
+                    chatMessages.innerHTML = '';
+                }
+            }, 100);
+        }
+
+        init();
+    })();
+</script>
 </body>
 </html>

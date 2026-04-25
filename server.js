@@ -76,7 +76,8 @@ app.post('/api/register', (req, res) => {
         createdAt: new Date().toISOString(),
         appointments: [],
         clients: [],
-        notifications: []
+        notifications: [],
+        unreadCounts: {}  // { "otherUserId": count }
     };
     globalData.users.push(newUser);
     saveData();
@@ -95,6 +96,7 @@ app.get('/api/user/:id', (req, res) => {
     if (user) { 
         const { password, ...userData } = user; 
         if (!userData.certificates) userData.certificates = [];
+        if (!userData.unreadCounts) userData.unreadCounts = {};
         res.json({ success: true, user: userData }); 
     }
     else res.json({ success: false, error: 'Пользователь не найден' });
@@ -120,7 +122,8 @@ app.put('/api/user/profile', upload.single('avatar'), (req, res) => {
     }
     
     saveData();
-    res.json({ success: true, user });
+    const { password: _, ...safeUser } = user;
+    res.json({ success: true, user: safeUser });
 });
 
 app.put('/api/schedule', (req, res) => {
@@ -169,8 +172,7 @@ app.post('/api/upload-recording', upload.single('recording'), (req, res) => {
     res.json({ success: true, recordingUrl: recording.url });
 });
 
-// ---- СЕРТИФИКАТЫ (ИСПРАВЛЕННАЯ ВЕРСИЯ) ----
-// ---- СЕРТИФИКАТЫ (исправленная версия 2) ----
+// ---- Сертификаты ----
 app.post('/api/certificates', upload.single('certificate'), (req, res) => {
     try {
         const { userId, title } = req.body;
@@ -195,7 +197,6 @@ app.post('/api/certificates', upload.single('certificate'), (req, res) => {
         
         saveData();
         
-        // Возвращаем обновлённого пользователя целиком, чтобы клиент мог сразу обновить currentUser
         const { password, ...safeUser } = user;
         res.json({ success: true, certificate: newCert, user: safeUser });
     } catch (err) {
@@ -223,6 +224,7 @@ app.delete('/api/certificates/:userId/:certId', (req, res) => {
         res.json({ success: false, error: err.message });
     }
 });
+
 // ---- Посты ----
 app.get('/api/posts', (req, res) => {
     const posts = [...globalData.posts].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -389,9 +391,14 @@ app.post('/api/appointment', (req, res) => {
     const roomId = Math.random().toString(36).substring(2, 10).toUpperCase();
     const appointment = { id: Date.now().toString(), psychologistId, psychologistName: psychologist.fullName, clientId, clientName: client.fullName, date, time, roomId, status: 'pending', createdAt: new Date().toISOString() };
     globalData.appointments.push(appointment);
+    if (!client.appointments) client.appointments = [];
     client.appointments.push(appointment);
+    if (!psychologist.clients) psychologist.clients = [];
     psychologist.clients.push({ clientId, clientName: client.fullName, appointmentId: appointment.id, date, time, status: 'pending', roomId });
+    
+    // Уведомление психологу
     const notification = { id: Date.now().toString(), type: 'new_appointment', title: 'Новая заявка', message: `${client.fullName} хочет записаться на ${date} в ${time}`, appointmentId: appointment.id, roomId, read: false, createdAt: new Date().toISOString() };
+    if (!psychologist.notifications) psychologist.notifications = [];
     psychologist.notifications.unshift(notification);
     saveData();
     io.to(psychologistId).emit('notification', notification);
@@ -406,14 +413,49 @@ app.post('/api/appointment/confirm', (req, res) => {
     appointment.status = 'confirmed';
     const psychologist = getUser(psychologistId);
     const client = getUser(clientId);
-    if (psychologist) { const c = psychologist.clients.find(c => c.appointmentId === appointmentId); if (c) c.status = 'confirmed'; }
-    if (client) { const a = client.appointments.find(a => a.id === appointmentId); if (a) a.status = 'confirmed'; }
-    const notification = { id: Date.now().toString(), type: 'appointment_confirmed', title: 'Запись подтверждена!', message: `${psychologist.fullName} подтвердил запись на ${appointment.date} в ${appointment.time}`, appointmentId, roomId: appointment.roomId, read: false, createdAt: new Date().toISOString() };
-    client.notifications.unshift(notification);
+    if (psychologist && psychologist.clients) {
+        const c = psychologist.clients.find(c => c.appointmentId === appointmentId);
+        if (c) c.status = 'confirmed';
+    }
+    if (client && client.appointments) {
+        const a = client.appointments.find(a => a.id === appointmentId);
+        if (a) a.status = 'confirmed';
+    }
+    // Удаляем уведомление о новой заявке у психолога (если есть)
+    if (psychologist && psychologist.notifications) {
+        psychologist.notifications = psychologist.notifications.filter(n => n.appointmentId !== appointmentId);
+    }
+    // Добавляем уведомление клиенту о подтверждении
+    const clientNotif = { id: Date.now().toString(), type: 'appointment_confirmed', title: 'Запись подтверждена!', message: `${psychologist.fullName} подтвердил запись на ${appointment.date} в ${appointment.time}`, appointmentId, roomId: appointment.roomId, read: false, createdAt: new Date().toISOString() };
+    if (!client.notifications) client.notifications = [];
+    client.notifications.unshift(clientNotif);
     saveData();
-    io.to(clientId).emit('notification', notification);
+    io.to(clientId).emit('notification', clientNotif);
     io.to(clientId).emit('appointment_updated', appointment);
     io.to(psychologistId).emit('appointment_updated', appointment);
+    res.json({ success: true });
+});
+
+// Отметить звонок как завершённый (вызывается из call.html)
+app.post('/api/appointment/complete', (req, res) => {
+    const { appointmentId } = req.body;
+    const appointment = globalData.appointments.find(a => a.id === appointmentId);
+    if (!appointment) return res.json({ success: false });
+    appointment.status = 'completed';
+    const psychologist = getUser(appointment.psychologistId);
+    const client = getUser(appointment.clientId);
+    if (psychologist && psychologist.clients) {
+        const c = psychologist.clients.find(c => c.appointmentId === appointmentId);
+        if (c) c.status = 'completed';
+    }
+    if (client && client.appointments) {
+        const a = client.appointments.find(a => a.id === appointmentId);
+        if (a) a.status = 'completed';
+    }
+    saveData();
+    // Оповещаем обоих, что звонок завершён (для обновления интерфейса)
+    io.to(appointment.psychologistId).emit('appointment_completed', appointmentId);
+    io.to(appointment.clientId).emit('appointment_completed', appointmentId);
     res.json({ success: true });
 });
 
@@ -553,7 +595,7 @@ app.post('/api/subscriptions', (req, res) => {
     }
 });
 
-// ---- Чат ----
+// ---- Чат (с учётом непрочитанных) ----
 app.get('/api/messages/:userId', (req, res) => {
     const userId = req.params.userId;
     const user = getUser(userId);
@@ -568,6 +610,17 @@ app.post('/api/messages', (req, res) => {
     const { from, to, text, image, voice } = req.body;
     const newMsg = { id: Date.now().toString(), from, to, text: text || '', image: image || null, voice: voice || null, createdAt: new Date().toISOString(), isRead: false };
     globalData.messages.push(newMsg);
+    
+    // Увеличиваем счётчик непрочитанных для получателя
+    const recipient = getUser(to);
+    if (recipient) {
+        if (!recipient.unreadCounts) recipient.unreadCounts = {};
+        recipient.unreadCounts[from] = (recipient.unreadCounts[from] || 0) + 1;
+        saveData();
+        // Отправляем событие обновления счётчика
+        io.to(to).emit('unread_update', { from, count: recipient.unreadCounts[from] });
+    }
+    
     saveData();
     io.to(to).emit('new_message', newMsg);
     res.json({ success: true });
@@ -575,7 +628,17 @@ app.post('/api/messages', (req, res) => {
 
 app.post('/api/messages/read', (req, res) => {
     const { userId, fromUserId } = req.body;
-    globalData.messages.filter(m => m.to === userId && m.from === fromUserId && !m.isRead).forEach(m => m.isRead = true);
+    const user = getUser(userId);
+    if (user && user.unreadCounts && user.unreadCounts[fromUserId]) {
+        delete user.unreadCounts[fromUserId];
+        saveData();
+    }
+    // Помечаем сообщения как прочитанные
+    globalData.messages.forEach(m => {
+        if (m.to === userId && m.from === fromUserId && !m.isRead) {
+            m.isRead = true;
+        }
+    });
     saveData();
     res.json({ success: true });
 });
@@ -584,7 +647,7 @@ app.get('/api/psychologists', (req, res) => {
     res.json({ success: true, psychologists: globalData.users.filter(u => u.role === 'psychologist').map(({ password, ...u }) => u) });
 });
 
-// ---- WebRTC ----
+// ---- WebRTC (с поддержкой ролей) ----
 const activeRooms = new Map();
 io.on('connection', (socket) => {
     console.log(`🔌 Новое подключение: ${socket.id}`);
@@ -644,9 +707,33 @@ io.on('connection', (socket) => {
     socket.on('offer', (data) => socket.to(data.target).emit('offer', { sdp: data.sdp, from: socket.id }));
     socket.on('answer', (data) => socket.to(data.target).emit('answer', { sdp: data.sdp, from: socket.id }));
     socket.on('ice-candidate', (data) => socket.to(data.target).emit('ice-candidate', { candidate: data.candidate, from: socket.id }));
+    
     socket.on('end-call', () => {
         if (socket.roomId) {
             socket.to(socket.roomId).emit('call-ended');
+            // Отмечаем сеанс как завершённый
+            const room = activeRooms.get(socket.roomId);
+            if (room && room.users.size >= 2) {
+                // Попробуем найти appointmentId по комнате (нужно хранить соответствие)
+                // Для упрощения: ищем appointment с таким roomId в globalData.appointments
+                const appointment = globalData.appointments.find(a => a.roomId === socket.roomId);
+                if (appointment && appointment.status === 'confirmed') {
+                    appointment.status = 'completed';
+                    const psychologist = getUser(appointment.psychologistId);
+                    const client = getUser(appointment.clientId);
+                    if (psychologist && psychologist.clients) {
+                        const c = psychologist.clients.find(c => c.appointmentId === appointment.id);
+                        if (c) c.status = 'completed';
+                    }
+                    if (client && client.appointments) {
+                        const a = client.appointments.find(a => a.id === appointment.id);
+                        if (a) a.status = 'completed';
+                    }
+                    saveData();
+                    io.to(appointment.psychologistId).emit('appointment_completed', appointment.id);
+                    io.to(appointment.clientId).emit('appointment_completed', appointment.id);
+                }
+            }
             setTimeout(() => {
                 const room = activeRooms.get(socket.roomId);
                 if (room && (!room.psychologist || !room.client)) activeRooms.delete(socket.roomId);
@@ -655,6 +742,7 @@ io.on('connection', (socket) => {
             delete socket.roomId;
         }
     });
+    
     socket.on('disconnect', () => {
         if (socket.roomId) {
             socket.to(socket.roomId).emit('partner-disconnected');

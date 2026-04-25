@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
     <title>Therapy Call | Сообщество психологов</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -32,6 +32,7 @@
             overflow-x: hidden;
             padding-bottom: calc(var(--bottom-h) + 12px);
             min-height: 100vh;
+            touch-action: pan-x pan-y; /* отключаем зум на телефонах */
         }
         .video-background { position: fixed; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; }
         .video-overlay {
@@ -342,6 +343,7 @@
         .appt-status { font-size: 11px; margin-top: 3px; }
         .status-pending { color: #f59e0b; }
         .status-confirmed { color: var(--green); }
+        .status-completed { color: #9ca3af; text-decoration: line-through; }
         .appt-actions { display: flex; gap: 6px; flex-wrap: wrap; }
         .notes-grid { display: flex; flex-direction: column; gap: 8px; }
         .note-card {
@@ -395,6 +397,7 @@
         .chat-contact {
             display: flex; align-items: center; gap: 14px; padding: 13px 16px;
             cursor: pointer; border-radius: var(--radius-lg); transition: all 0.22s;
+            position: relative;
         }
         .chat-contact:hover { background: var(--glass-hover); border-color: var(--border-hover); }
         .chat-contact-avatar { width: 50px; height: 50px; border-radius: 50%; object-fit: cover; border: 2px solid var(--green-border); flex-shrink: 0; }
@@ -404,19 +407,21 @@
         .unread-badge {
             background: var(--green); color: #0d2010; border-radius: 20px;
             padding: 3px 10px; font-size: 11px; font-weight: 700; flex-shrink: 0;
+            min-width: 28px; text-align: center;
         }
         /* Фиксация страницы только при открытом чате */
         body.chat-open {
             overflow: hidden;
             position: fixed;
             width: 100%;
+            height: 100%;
         }
         body.chat-open .main-content {
             overflow-y: auto;
             height: calc(100vh - var(--nav-h) - var(--bottom-h));
         }
         .chat-page {
-            height: calc(100vh - var(--nav-h) - var(--bottom-h) - 16px);
+            height: calc(100vh - var(--nav-h) - var(--bottom-h));
             display: flex;
             flex-direction: column;
             padding: 0 8px;
@@ -669,7 +674,7 @@
             .btn-sm, .btn-login, .btn-register, .btn-logout { padding: 6px 14px; font-size: 12px; }
             .floating-notif { top: auto; bottom: calc(var(--bottom-h) + 10px); left: 16px; right: 16px; max-width: none; transform: translateY(120%); }
             .floating-notif.show { transform: translateY(0); }
-            .chat-page { height: calc(100vh - var(--nav-h) - var(--bottom-h) - 12px); }
+            .chat-page { height: calc(100vh - var(--nav-h) - var(--bottom-h)); }
             .message { max-width: 82%; }
             .apple-day { font-size: 12px; }
             .time-slot { padding: 4px 10px; font-size: 12px; }
@@ -714,6 +719,7 @@
     let currentChatPartner = null;
     let currentCalendarDate = new Date();
     let isLoading = false;
+    let unreadCounts = new Map(); // userId -> количество непрочитанных
 
     // ======================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =======================
     function showToast(msg, isErr = false) {
@@ -750,7 +756,7 @@
         section.classList.toggle('open');
     }
 
-    // ======================= УВЕДОМЛЕНИЯ (ЗВУК + ВСПЛЫВАЮЩЕЕ ОКНО) =======================
+    // ======================= ЗВУК УВЕДОМЛЕНИЙ =======================
     function notifySound() {
         try {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -764,7 +770,7 @@
             gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.5);
             osc.stop(audioCtx.currentTime + 0.5);
             setTimeout(() => audioCtx.close(), 600);
-        } catch(e) {}
+        } catch(e) { console.warn('Audio not allowed'); }
     }
 
     function showFloatingNotification(title, message, type = 'info') {
@@ -1004,6 +1010,7 @@
         const isPsych = currentUser.role === 'psychologist';
         document.getElementById('mainContent').innerHTML = `<div class="container"><div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i></div></div>`;
 
+        // Получаем данные
         const [postsRes, tasksRes, notesRes, subsRes] = await Promise.all([
             fetchJSON(`/api/posts?userId=${currentUser.id}`),
             isPsych ? fetchJSON(`/api/tasks/${currentUser.id}`) : Promise.resolve({ tasks: [] }),
@@ -1014,15 +1021,55 @@
         const myPosts = (postsRes.posts || []).filter(p => p.author.id === currentUser.id);
         const tasks = tasksRes.tasks || [];
         const notes = notesRes.notes || [];
-        const appointments = currentUser.clients || [];
-        const certificates = currentUser.certificates || [];
         const followersCount = subsRes.followers?.length || 0;
+        
+        // Для клиента - записи
+        let appointmentsHtml = '';
+        if (!isPsych && currentUser.appointments) {
+            const now = new Date();
+            const appointments = currentUser.appointments.filter(a => a.status === 'confirmed' || a.status === 'completed');
+            appointmentsHtml = `<div class="profile-sections">
+                <div class="collapsible-section open">
+                    <div class="collapsible-header" onclick="toggleSection(this)">
+                        <div class="collapsible-header-left">
+                            <div class="collapsible-icon">📅</div>
+                            <div>
+                                <div class="collapsible-title">Мои записи</div>
+                                <div class="collapsible-subtitle">${appointments.length} сеансов</div>
+                            </div>
+                        </div>
+                        <i class="fas fa-chevron-down collapsible-chevron"></i>
+                    </div>
+                    <div class="collapsible-body">
+                        ${appointments.map(apt => {
+                            const aptDateTime = new Date(`${apt.date}T${apt.time}`);
+                            const isCompleted = apt.status === 'completed' || aptDateTime < now;
+                            const statusText = isCompleted ? '✅ Завершён' : (apt.status === 'confirmed' ? '✅ Подтверждён' : '⏳ Ожидает');
+                            return `
+                            <div class="appointment-item">
+                                <div class="appt-info">
+                                    <div class="appt-name">${escapeHtml(apt.psychologistName)}</div>
+                                    <div class="appt-time">📅 ${apt.date} в ${apt.time}</div>
+                                    <div class="appt-status ${isCompleted ? 'status-completed' : (apt.status === 'confirmed' ? 'status-confirmed' : 'status-pending')}">${statusText}</div>
+                                </div>
+                                <div class="appt-actions">
+                                    ${!isCompleted && apt.status === 'confirmed' ? `<button class="btn-sm" onclick="startCall('${apt.roomId}', 'client')"><i class="fas fa-video"></i> Войти</button>` : ''}
+                                    ${isCompleted ? '<i class="fas fa-check-circle" style="color:var(--green); font-size:20px;"></i>' : ''}
+                                </div>
+                            </div>`;
+                        }).join('')}
+                        ${appointments.length === 0 ? '<div class="empty-state" style="padding:16px;"><i class="fas fa-calendar-times"></i><div>Нет записей</div></div>' : ''}
+                    </div>
+                </div>
+            </div>`;
+        }
 
         let psychSections = '';
         if (isPsych) {
-            const pendingCount = appointments.filter(a => a.status === 'pending').length;
-            const confirmedCount = appointments.filter(a => a.status === 'confirmed').length;
+            const pendingCount = (currentUser.clients || []).filter(a => a.status === 'pending').length;
+            const confirmedCount = (currentUser.clients || []).filter(a => a.status === 'confirmed').length;
             const undoneTasks = tasks.filter(t => !t.completed).length;
+            const certificates = currentUser.certificates || [];
 
             psychSections = `
             <div class="profile-sections">
@@ -1081,22 +1128,27 @@
                         <i class="fas fa-chevron-down collapsible-chevron"></i>
                     </div>
                     <div class="collapsible-body">
-                        ${appointments.map(apt => `
+                        ${(currentUser.clients || []).map(apt => {
+                            const now = new Date();
+                            const aptDateTime = new Date(`${apt.date}T${apt.time}`);
+                            const isCompleted = apt.status === 'completed' || aptDateTime < now;
+                            return `
                             <div class="appointment-item">
                                 <div class="appt-info">
                                     <div class="appt-name">${escapeHtml(apt.clientName)}</div>
                                     <div class="appt-time">📅 ${apt.date} в ${apt.time}</div>
                                     <div class="appt-status ${apt.status === 'confirmed' ? 'status-confirmed' : 'status-pending'}">
-                                        ${apt.status === 'confirmed' ? '✅ Подтверждено' : '⏳ Ожидает'}
+                                        ${apt.status === 'confirmed' ? (isCompleted ? '✅ Завершён' : '✅ Подтверждено') : '⏳ Ожидает'}
                                     </div>
                                 </div>
                                 <div class="appt-actions">
                                     ${apt.status === 'pending' ? `<button class="btn-sm" onclick="confirmAppointment('${apt.appointmentId}','${apt.clientId}')">Подтвердить</button>` : ''}
-                                    ${apt.status === 'confirmed' ? `<button class="btn-sm" onclick="startCall('${apt.roomId}')"><i class="fas fa-video"></i> Начать</button>` : ''}
+                                    ${apt.status === 'confirmed' && !isCompleted ? `<button class="btn-sm" onclick="startCall('${apt.roomId}', 'psychologist')"><i class="fas fa-video"></i> Начать</button>` : ''}
+                                    ${isCompleted ? '<i class="fas fa-check-circle" style="color:var(--green); font-size:20px;"></i>' : ''}
                                 </div>
-                            </div>
-                        `).join('')}
-                        ${appointments.length === 0 ? '<div class="empty-state" style="padding:16px;"><i class="fas fa-calendar-times"></i><div>Нет записей</div></div>' : ''}
+                            </div>`;
+                        }).join('')}
+                        ${(currentUser.clients || []).length === 0 ? '<div class="empty-state" style="padding:16px;"><i class="fas fa-calendar-times"></i><div>Нет записей</div></div>' : ''}
                     </div>
                 </div>
 
@@ -1112,7 +1164,7 @@
                         <i class="fas fa-chevron-down collapsible-chevron"></i>
                     </div>
                     <div class="collapsible-body">
-                        ${appointments.filter(a => a.status === 'confirmed').map(apt => `
+                        ${(currentUser.clients || []).filter(a => a.status === 'confirmed').map(apt => `
                             <div class="client-item">
                                 <div>
                                     <div class="client-name">${escapeHtml(apt.clientName)}</div>
@@ -1123,7 +1175,7 @@
                                 </button>
                             </div>
                         `).join('')}
-                        ${appointments.filter(a => a.status === 'confirmed').length === 0 ? '<div class="empty-state" style="padding:16px;"><i class="fas fa-users-slash"></i><div>Нет завершённых звонков</div></div>' : ''}
+                        ${(currentUser.clients || []).filter(a => a.status === 'confirmed').length === 0 ? '<div class="empty-state" style="padding:16px;"><i class="fas fa-users-slash"></i><div>Нет завершённых звонков</div></div>' : ''}
                     </div>
                 </div>
 
@@ -1207,10 +1259,13 @@
                     </div>
                 </div>
 
+                ${!isPsych ? appointmentsHtml : ''}
+
+                ${isPsych ? `
                 <div style="margin-bottom: 16px;">
                     <div class="section-header-row">
                         <h3>Мои посты</h3>
-                        ${isPsych ? `<button class="btn-sm" onclick="createPostModal()"><i class="fas fa-plus"></i> Новый</button>` : ''}
+                        <button class="btn-sm" onclick="createPostModal()"><i class="fas fa-plus"></i> Новый</button>
                     </div>
                     <div class="posts-grid">
                         ${myPosts.map(p => `
@@ -1230,23 +1285,23 @@
                         ${myPosts.length === 0 ? '<div class="empty-state glass-card" style="padding:24px;"><i class="fas fa-newspaper"></i><div>Нет постов</div></div>' : ''}
                     </div>
                 </div>
+                ` : ''}
 
                 ${psychSections}
             </div>
         `;
         document.getElementById('mainContent').innerHTML = html;
 
-        document.querySelectorAll('.profile-edit-post').forEach(b => {
-            b.onclick = () => openEditPostModal(b.dataset.id, b.dataset.text);
-        });
-        document.querySelectorAll('.profile-delete-post').forEach(b => {
-            b.onclick = () => openConfirmModal('Удалить пост?', 'Это действие нельзя отменить.', async () => {
-                await fetch(`/api/posts/${b.dataset.id}`, { method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ authorId: currentUser.id }) });
-                renderProfile();
-            });
-        });
-
         if (isPsych) {
+            document.querySelectorAll('.profile-edit-post').forEach(b => {
+                b.onclick = () => openEditPostModal(b.dataset.id, b.dataset.text);
+            });
+            document.querySelectorAll('.profile-delete-post').forEach(b => {
+                b.onclick = () => openConfirmModal('Удалить пост?', 'Это действие нельзя отменить.', async () => {
+                    await fetch(`/api/posts/${b.dataset.id}`, { method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ authorId: currentUser.id }) });
+                    renderProfile();
+                });
+            });
             document.querySelectorAll('.task-cb').forEach(cb => {
                 cb.onchange = async () => {
                     await fetch(`/api/tasks/${cb.dataset.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ completed: cb.checked }) });
@@ -1254,7 +1309,6 @@
                     if (label) label.classList.toggle('task-completed', cb.checked);
                 };
             });
-
             const calSection = document.getElementById('sec-calendar');
             if (calSection) {
                 const header = calSection.querySelector('.collapsible-header');
@@ -1269,7 +1323,7 @@
         checkUpcomingEvents();
     }
 
-    // ======================= КАЛЕНДАРЬ В ПРОФИЛЕ (APPLE STYLE) =======================
+    // ======================= КАЛЕНДАРЬ В ПРОФИЛЕ =======================
     async function renderProfileCalendar() {
         const container = document.getElementById('profileCalendar');
         if (!container) return;
@@ -1327,7 +1381,7 @@
                 content += `
                     <div style="background: var(--green-dim); border-radius: 16px; padding: 14px; margin-bottom: 12px;">
                         <div><i class="fas fa-phone-alt"></i> ${escapeHtml(ev.title)}</div>
-                        <button class="btn-sm" style="margin-top: 12px;" onclick="startCall('${ev.roomId}'); closeModal('dayEventsModal')">
+                        <button class="btn-sm" style="margin-top: 12px;" onclick="startCall('${ev.roomId}', 'psychologist'); closeModal('dayEventsModal')">
                             <i class="fas fa-video"></i> Войти в звонок
                         </button>
                     </div>`;
@@ -1488,7 +1542,7 @@
         input.click();
     }
 
-    // ======================= РАСПИСАНИЕ (ИСПРАВЛЕННОЕ: ФОРМА ВВЕРХУ, СПИСОК СНИЗУ) =======================
+    // ======================= РАСПИСАНИЕ =======================
     function showScheduleEditor() {
         const schedule = currentUser.schedule || {};
         const renderSlots = () => {
@@ -1566,89 +1620,59 @@
         };
     }
 
-    // ======================= ЗАДАЧИ (С КАЛЕНДАРЁМ ДЛЯ ВЫБОРА ДАТЫ) =======================
+    // ======================= ЗАДАЧИ =======================
     async function addTaskWithDate() {
-    return new Promise((resolve) => {
-        const modalId = 'addTaskModal_' + Date.now();
-        const html = `
-            <div class="modal" id="${modalId}">
-                <div class="modal-content">
-                    <div class="modal-handle"></div>
-                    <h3>Новая задача</h3>
-                    <label style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:6px;">Дата выполнения (необязательно)</label>
-                    <input type="date" id="taskDueDate_${modalId}" style="margin-bottom:16px; width:100%;">
-                    <input type="text" id="taskText_${modalId}" placeholder="Введите задачу..." style="margin-bottom:20px;">
-                    <div class="modal-buttons">
-                        <button class="btn-secondary" id="cancelTaskBtn_${modalId}">Отмена</button>
-                        <button class="btn-primary" id="saveTaskBtn_${modalId}">Сохранить</button>
-                    </div>
-                </div>
-            </div>`;
-        document.body.insertAdjacentHTML('beforeend', html);
-        const modal = document.getElementById(modalId);
-        const textInput = document.getElementById(`taskText_${modalId}`);
-        const dueDateInput = document.getElementById(`taskDueDate_${modalId}`);
-        const cancelBtn = document.getElementById(`cancelTaskBtn_${modalId}`);
-        const saveBtn = document.getElementById(`saveTaskBtn_${modalId}`);
-
-        const cleanup = () => {
-            modal.classList.remove('active');
-            setTimeout(() => modal.remove(), 300);
-        };
-
-        saveBtn.onclick = async () => {
-            const text = textInput.value.trim();
-            if (!text) {
-                showToast('Введите текст задачи', true);
-                return;
-            }
-            const dueDate = dueDateInput.value || null;
-            await fetch('/api/tasks', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ psychologistId: currentUser.id, text: text, dueDate: dueDate })
-            });
-            showToast('Задача добавлена');
-            cleanup();
-            renderProfile();
-            resolve();
-        };
-        cancelBtn.onclick = () => {
-            cleanup();
-            resolve();
-        };
-        setTimeout(() => modal.classList.add('active'), 10);
-        textInput.focus();
-    });
-}
-
-    function openDatePickerModal(label) {
         return new Promise((resolve) => {
-            const modalId = 'datePickerModal_' + Date.now();
+            const modalId = 'addTaskModal_' + Date.now();
             const html = `
                 <div class="modal" id="${modalId}">
                     <div class="modal-content">
                         <div class="modal-handle"></div>
-                        <h3>${escapeHtml(label)}</h3>
-                        <input type="date" id="datePicker_${modalId}" style="margin-bottom:16px;">
+                        <h3>Новая задача</h3>
+                        <label style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:6px;">Дата выполнения (необязательно)</label>
+                        <input type="date" id="taskDueDate_${modalId}" style="margin-bottom:16px; width:100%;">
+                        <input type="text" id="taskText_${modalId}" placeholder="Введите задачу..." style="margin-bottom:20px;">
                         <div class="modal-buttons">
-                            <button class="btn-secondary" id="cancelDateBtn_${modalId}">Без даты</button>
-                            <button class="btn-primary" id="okDateBtn_${modalId}">Выбрать</button>
+                            <button class="btn-secondary" id="cancelTaskBtn_${modalId}">Отмена</button>
+                            <button class="btn-primary" id="saveTaskBtn_${modalId}">Сохранить</button>
                         </div>
                     </div>
                 </div>`;
             document.body.insertAdjacentHTML('beforeend', html);
             const modal = document.getElementById(modalId);
-            const dateInput = document.getElementById(`datePicker_${modalId}`);
-            const cancel = document.getElementById(`cancelDateBtn_${modalId}`);
-            const ok = document.getElementById(`okDateBtn_${modalId}`);
+            const textInput = document.getElementById(`taskText_${modalId}`);
+            const dueDateInput = document.getElementById(`taskDueDate_${modalId}`);
+            const cancelBtn = document.getElementById(`cancelTaskBtn_${modalId}`);
+            const saveBtn = document.getElementById(`saveTaskBtn_${modalId}`);
+
             const cleanup = () => {
                 modal.classList.remove('active');
                 setTimeout(() => modal.remove(), 300);
             };
-            ok.onclick = () => { const val = dateInput.value; cleanup(); resolve(val || null); };
-            cancel.onclick = () => { cleanup(); resolve(null); };
+
+            saveBtn.onclick = async () => {
+                const text = textInput.value.trim();
+                if (!text) {
+                    showToast('Введите текст задачи', true);
+                    return;
+                }
+                const dueDate = dueDateInput.value || null;
+                await fetch('/api/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ psychologistId: currentUser.id, text: text, dueDate: dueDate })
+                });
+                showToast('Задача добавлена');
+                cleanup();
+                renderProfile();
+                resolve();
+            };
+            cancelBtn.onclick = () => {
+                cleanup();
+                resolve();
+            };
             setTimeout(() => modal.classList.add('active'), 10);
+            textInput.focus();
         });
     }
 
@@ -1660,10 +1684,15 @@
     }
 
     async function confirmAppointment(appointmentId, clientId) {
-        await fetch('/api/appointment/confirm', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ appointmentId, psychologistId: currentUser.id, clientId }) });
-        showToast('Запись подтверждена');
-        await refreshUser();
-        renderProfile();
+        const res = await fetch('/api/appointment/confirm', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ appointmentId, psychologistId: currentUser.id, clientId }) });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Запись подтверждена');
+            await refreshUser();
+            renderProfile();
+        } else {
+            showToast('Ошибка подтверждения', true);
+        }
     }
 
     // ======================= ЗАМЕТКИ =======================
@@ -1851,6 +1880,13 @@
                     lastTime: msg.createdAt,
                     unread: !msg.isRead && msg.to === currentUser.id
                 });
+            } else {
+                const existing = contactsMap.get(contactId);
+                if (!msg.isRead && msg.to === currentUser.id) existing.unread = true;
+                if (new Date(msg.createdAt) > new Date(existing.lastTime)) {
+                    existing.lastMessage = msg.text || (msg.image ? '📷 Фото' : (msg.voice ? '🎤 Голосовое' : 'Вложение'));
+                    existing.lastTime = msg.createdAt;
+                }
             }
         });
         const contacts = await Promise.all(Array.from(contactsMap.keys()).map(async id => {
@@ -1863,6 +1899,7 @@
 
         let html = `<div class="container"><div class="page-title">Сообщения</div><div class="chat-list">`;
         for (const c of validContacts) {
+            const unreadCount = c.unread ? 1 : 0; // упрощённо, можно хранить точное количество на сервере
             html += `
                 <div class="chat-contact glass-card" onclick="openChat('${c.id}','${escapeHtml(c.fullName)}')">
                     <img class="chat-contact-avatar" src="${escapeHtml(c.avatar)}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(c.fullName)}&background=8bca8b&color=fff'">
@@ -1870,7 +1907,7 @@
                         <div class="chat-contact-name">${escapeHtml(c.fullName)}</div>
                         <div class="chat-contact-last">${escapeHtml((c.lastMessage || '').substring(0, 40))}</div>
                     </div>
-                    ${c.unread ? '<div class="unread-badge">Новое</div>' : ''}
+                    ${unreadCount > 0 ? `<div class="unread-badge">${unreadCount}</div>` : ''}
                 </div>
             `;
         }
@@ -1881,7 +1918,10 @@
 
     async function openChat(userId, userName) {
         currentChatPartner = { id: userId, name: userName };
+        // Помечаем сообщения как прочитанные
         await fetch('/api/messages/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, fromUserId: userId }) });
+        // Обновляем локальный счётчик непрочитанных
+        unreadCounts.set(userId, 0);
         document.getElementById('mainContent').innerHTML = `
             <div class="chat-page">
                 <div class="chat-messages-container">
@@ -2032,6 +2072,7 @@
 
     function setupChatSocket() {
         if (socket) socket.off('new_message');
+        if (socket) socket.off('notification');
         socket = io();
         socket.on('connect', () => { if (currentUser) socket.emit('register_user', currentUser.id); });
         socket.on('new_message', async (msg) => {
@@ -2049,11 +2090,14 @@
                     showFloatingNotification('Новое сообщение', 'У вас новое сообщение');
                 }
                 if (currentUser) refreshUser();
+                // Обновляем список чатов (чтобы появилась точка)
+                if (currentTab === 'chats') renderChats();
             }
         });
         socket.on('notification', (notif) => {
             showFloatingNotification(notif.title, notif.message);
             if (currentUser) refreshUser();
+            if (currentTab === 'notifications') renderNotifications();
         });
     }
 
@@ -2069,18 +2113,29 @@
         const notifs = currentUser.notifications || [];
         let html = `<div class="container"><div class="page-title">Уведомления</div><div class="notifications-list">`;
         for (const n of notifs) {
+            // Если это уведомление о новой записи и роль психолога, показываем кнопку "Подтвердить"
+            const isAppointmentNotif = n.type === 'new_appointment' && currentUser.role === 'psychologist';
             html += `
                 <div class="notification-item glass-card">
                     <div class="notif-title">${escapeHtml(n.title)}</div>
                     <div class="notif-msg">${escapeHtml(n.message)}</div>
                     <div class="notif-time">${new Date(n.createdAt).toLocaleString()}</div>
-                    ${n.roomId ? `<div style="margin-top:10px;"><button class="btn-sm" onclick="startCall('${n.roomId}')"><i class="fas fa-video"></i> Войти в звонок</button></div>` : ''}
+                    ${isAppointmentNotif ? `<div style="margin-top:10px;"><button class="btn-sm" onclick="confirmAppointmentFromNotif('${n.appointmentId}')">✅ Подтвердить</button></div>` : ''}
+                    ${n.roomId && !isAppointmentNotif ? `<div style="margin-top:10px;"><button class="btn-sm" onclick="startCall('${n.roomId}', '${currentUser.role}')"><i class="fas fa-video"></i> Войти в звонок</button></div>` : ''}
                 </div>
             `;
         }
         if (notifs.length === 0) html += '<div class="empty-state glass-card" style="padding:40px;"><i class="fas fa-bell-slash"></i><div>Нет уведомлений</div></div>';
         html += `</div></div>`;
         document.getElementById('mainContent').innerHTML = html;
+    }
+
+    async function confirmAppointmentFromNotif(appointmentId) {
+        // Находим запись в currentUser.clients
+        const apt = currentUser.clients.find(a => a.appointmentId === appointmentId);
+        if (!apt) { showToast('Запись не найдена', true); return; }
+        await confirmAppointment(appointmentId, apt.clientId);
+        renderNotifications(); // обновить страницу уведомлений
     }
 
     // ======================= ЗАПИСЬ К ПСИХОЛОГУ =======================
@@ -2384,7 +2439,9 @@
         openConfirmModal('Выйти из аккаунта?', '', () => { localStorage.clear(); location.reload(); });
     }
 
-    function startCall(roomId) { window.location.href = `/call.html?room=${roomId}`; }
+    function startCall(roomId, role) {
+        window.location.href = `/call.html?room=${roomId}&role=${role}`;
+    }
 
     async function refreshUser() {
         const r = await fetch(`/api/user/${currentUser.id}`);
@@ -2404,7 +2461,7 @@
         }
     });
 
-    // ======================= ПРОМПТ МОДАЛ (БЕЗ КОНФЛИКТОВ) =======================
+    // ======================= ПРОМПТ МОДАЛ =======================
     function openPromptModal(label, confirmText = 'ОК') {
         return new Promise((resolve) => {
             const modalId = 'promptModal_' + Date.now();
