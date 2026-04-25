@@ -33,7 +33,6 @@
             padding-bottom: calc(var(--bottom-h) + env(safe-area-inset-bottom));
             min-height: 100vh;
         }
-        /* Фон – статичный градиент (легче для сервера) */
         body::before {
             content: '';
             position: fixed;
@@ -127,7 +126,7 @@
         .post-time { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
         .post-text { margin-bottom: 12px; line-height: 1.6; font-size: 14px; color: rgba(255,255,255,0.88); }
         .post-image { max-width: 100%; border-radius: var(--radius-md); margin-bottom: 12px; cursor: pointer; display: block; }
-        .post-video { max-width: 100%; border-radius: var(--radius-md); margin-bottom: 12px; cursor: pointer; }
+        .post-video { max-width: 100%; border-radius: var(--radius-md); margin-bottom: 12px; cursor: pointer; background: #000; }
         .post-stats {
             display: flex; gap: 18px; padding: 10px 0;
             border-top: 1px solid var(--border);
@@ -662,6 +661,32 @@
         .review-name { font-weight: 600; font-size: 13.5px; }
         .review-text { font-size: 13px; color: rgba(255,255,255,0.78); line-height: 1.5; }
         .review-time { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
+        /* Индикатор загрузки видео */
+        .upload-progress {
+            margin-top: 12px;
+            background: rgba(139,202,139,0.2);
+            border-radius: 20px;
+            overflow: hidden;
+            height: 6px;
+            width: 100%;
+        }
+        .upload-progress-bar {
+            width: 0%;
+            height: 100%;
+            background: var(--green);
+            transition: width 0.2s;
+        }
+        .spinner-small {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: var(--green);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
         @media (max-width: 768px) {
             .modal-content { padding: 20px 16px 24px; }
             .btn-sm, .btn-login, .btn-register, .btn-logout { padding: 6px 14px; font-size: 12px; }
@@ -709,6 +734,7 @@
         let currentCalendarDate = new Date();
         let isLoading = false;
         let audioAllowed = false;
+        let isPosting = false;
 
         // ======================= ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =======================
         function showToast(msg, isErr = false) {
@@ -745,7 +771,6 @@
             if (section) section.classList.toggle('open');
         }
 
-        // ======================= ЗВУК УВЕДОМЛЕНИЙ =======================
         function playBeep() {
             if (!audioAllowed) return;
             try {
@@ -780,7 +805,6 @@
             playBeep();
         }
 
-        // ======================= СЖАТИЕ ИЗОБРАЖЕНИЙ =======================
         async function compressImage(file, maxSize = 1024, quality = 0.8) {
             return new Promise((resolve, reject) => {
                 const img = new Image();
@@ -809,7 +833,9 @@
 
         function scrollToBottom() {
             const container = document.getElementById('chatMessagesList');
-            if (container) container.scrollTop = container.scrollHeight;
+            if (container) {
+                container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            }
         }
 
         function openImageModal(imgUrl) {
@@ -827,7 +853,7 @@
             setTimeout(() => document.getElementById('imageModal').classList.add('active'), 10);
         }
 
-        // ======================= ИНИЦИАЛИЗАЦИЯ СОКЕТА (ОДИН РАЗ) =======================
+        // ======================= ИНИЦИАЛИЗАЦИЯ СОКЕТА =======================
         function initSocket() {
             if (socket) {
                 socket.disconnect();
@@ -1050,7 +1076,19 @@
             document.getElementById('mainContent').innerHTML = html;
         }
 
-        // ======================= ПРОФИЛЬ =======================
+        // ======================= ПРОФИЛЬ (упрощённо, но все функции будут во второй части) =======================
+        async function renderProfile() {
+            if (!currentUser) { showToast('Войдите в аккаунт', true); return; }
+            const isPsych = currentUser.role === 'psychologist';
+            document.getElementById('mainContent').innerHTML = `<div class="container"><div class="empty-state"><i class="fas fa-circle-notch fa-spin"></i></div></div>`;
+            // Полный код renderProfile будет во второй части (очень большой)
+            // Здесь пока заглушка
+            setTimeout(() => {
+                document.getElementById('mainContent').innerHTML = '<div class="container"><div class="empty-state">Профиль загружается...</div></div>';
+            }, 100);
+        }
+
+                // ======================= ПРОФИЛЬ (ПОЛНАЯ ВЕРСИЯ) =======================
         async function renderProfile() {
             if (!currentUser) { showToast('Войдите в аккаунт', true); return; }
             const isPsych = currentUser.role === 'psychologist';
@@ -1068,7 +1106,6 @@
             const notes = notesRes.notes || [];
             const followersCount = subsRes.followers?.length || 0;
 
-            // Для клиента - записи
             let appointmentsHtml = '';
             if (!isPsych && currentUser.appointments) {
                 const now = new Date();
@@ -1371,7 +1408,6 @@
             checkUpcomingEvents();
         }
 
-        // ======================= КАЛЕНДАРЬ В ПРОФИЛЕ =======================
         async function renderProfileCalendar() {
             const container = document.getElementById('profileCalendar');
             if (!container) return;
@@ -2008,6 +2044,7 @@
             });
 
             await loadChatMessages();
+            scrollToBottom();
 
             document.getElementById('sendMsgBtn').onclick = sendChatMessage;
             document.getElementById('chatMessageInput').onkeypress = (e) => { if (e.key === 'Enter') sendChatMessage(); };
@@ -2261,7 +2298,7 @@
             };
         }
 
-        // ======================= ПОСТЫ =======================
+        // ======================= НОВЫЙ ПОСТ (С ИНДИКАТОРОМ ЗАГРУЗКИ И ЗАЩИТОЙ) =======================
         function createPostModal() {
             const html = `
                 <div class="modal" id="cpModal">
@@ -2272,9 +2309,10 @@
                         <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;">Фото или видео (необязательно, видео до 1 минуты)</label>
                         <input type="file" id="postMedia" accept="image/*,video/*" style="font-size:12px;">
                         <div id="mediaPreview" style="margin-top:8px; display:none;"></div>
+                        <div id="uploadProgress" style="display:none;" class="upload-progress"><div class="upload-progress-bar"></div></div>
                         <div class="modal-buttons">
                             <button class="btn-secondary" onclick="closeModal('cpModal')">Отмена</button>
-                            <button class="btn-primary" onclick="createPost()">Опубликовать</button>
+                            <button class="btn-primary" id="publishPostBtn">Опубликовать</button>
                         </div>
                     </div>
                 </div>`;
@@ -2283,9 +2321,15 @@
             
             const mediaInput = document.getElementById('postMedia');
             const previewDiv = document.getElementById('mediaPreview');
+            const progressDiv = document.getElementById('uploadProgress');
+            const progressBar = progressDiv.querySelector('.upload-progress-bar');
+            const publishBtn = document.getElementById('publishPostBtn');
+            let selectedFile = null;
+
             mediaInput.onchange = async () => {
                 const file = mediaInput.files[0];
                 if (!file) return;
+                selectedFile = file;
                 if (file.type.startsWith('video/')) {
                     const video = document.createElement('video');
                     video.preload = 'metadata';
@@ -2296,6 +2340,7 @@
                             mediaInput.value = '';
                             previewDiv.innerHTML = '';
                             previewDiv.style.display = 'none';
+                            selectedFile = null;
                         } else {
                             previewDiv.innerHTML = `<video controls style="max-width:100%; max-height:120px; border-radius:12px;"><source src="${URL.createObjectURL(file)}"></video><div style="font-size:11px; color:var(--text-muted); margin-top:4px;">✅ Видео ${Math.round(video.duration)} сек.</div>`;
                             previewDiv.style.display = 'block';
@@ -2312,34 +2357,72 @@
                 } else {
                     showToast('Неподдерживаемый формат', true);
                     mediaInput.value = '';
+                    selectedFile = null;
+                }
+            };
+
+            publishBtn.onclick = async () => {
+                if (isPosting) {
+                    showToast('Пост уже публикуется, подождите...', true);
+                    return;
+                }
+                const txt = document.getElementById('postText').value;
+                if (!txt.trim()) { showToast('Введите текст', true); return; }
+                isPosting = true;
+                publishBtn.disabled = true;
+                publishBtn.innerHTML = '<span class="spinner-small"></span> Публикация...';
+                
+                const fd = new FormData();
+                fd.append('authorId', currentUser.id);
+                fd.append('text', txt);
+                if (selectedFile) {
+                    if (selectedFile.type.startsWith('video/')) {
+                        fd.append('video', selectedFile);
+                    } else if (selectedFile.type.startsWith('image/')) {
+                        fd.append('image', selectedFile);
+                    }
+                }
+                
+                progressDiv.style.display = 'block';
+                let progress = 0;
+                const interval = setInterval(() => {
+                    progress += 10;
+                    if (progress <= 90) progressBar.style.width = progress + '%';
+                }, 200);
+                
+                try {
+                    const res = await fetch('/api/posts', { method:'POST', body: fd });
+                    const data = await res.json();
+                    clearInterval(interval);
+                    progressBar.style.width = '100%';
+                    if (data.success) {
+                        setTimeout(() => {
+                            closeModal('cpModal');
+                            showToast('Пост опубликован');
+                            if (currentTab === 'profile') renderProfile();
+                            else renderFeed();
+                        }, 500);
+                    } else {
+                        showToast(data.error || 'Ошибка публикации', true);
+                        progressDiv.style.display = 'none';
+                    }
+                } catch(err) {
+                    clearInterval(interval);
+                    showToast('Ошибка соединения', true);
+                    progressDiv.style.display = 'none';
+                } finally {
+                    isPosting = false;
+                    publishBtn.disabled = false;
+                    publishBtn.innerHTML = 'Опубликовать';
+                    setTimeout(() => { progressDiv.style.display = 'none'; progressBar.style.width = '0%'; }, 1000);
                 }
             };
         }
 
         async function createPost() {
-            const txt = document.getElementById('postText').value;
-            if (!txt.trim()) { showToast('Введите текст', true); return; }
-            const fd = new FormData();
-            fd.append('authorId', currentUser.id);
-            fd.append('text', txt);
-            const mediaFile = document.getElementById('postMedia').files[0];
-            if (mediaFile) {
-                if (mediaFile.type.startsWith('video/')) {
-                    fd.append('video', mediaFile);
-                } else if (mediaFile.type.startsWith('image/')) {
-                    fd.append('image', mediaFile);
-                }
-            }
-            const res = await fetch('/api/posts', { method:'POST', body: fd });
-            const data = await res.json();
-            if (data.success) {
-                closeModal('cpModal');
-                showToast('Пост опубликован');
-                if (currentTab === 'profile') renderProfile();
-                else renderFeed();
-            } else {
-                showToast(data.error || 'Ошибка публикации', true);
-            }
+            // Функция createPost теперь не используется, т.к. создание поста идёт через createPostModal
+            // Оставлена для совместимости, но неактивна
+            showToast('Используйте кнопку "Опубликовать" в модальном окне', true);
         }
 
         // ======================= ПОИСК =======================
@@ -2558,6 +2641,7 @@
             });
         }
 
+        // ======================= НАВИГАЦИЯ =======================
         function switchTab(tab) {
             currentTab = tab;
             document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
@@ -2570,6 +2654,7 @@
             else if (tab === 'profile') renderProfile();
         }
 
+        // ======================= ИНИЦИАЛИЗАЦИЯ =======================
         async function init() {
             const uid = localStorage.getItem('userId');
             if (uid) {
@@ -2592,6 +2677,9 @@
             else { renderFeed(); }
         }
         init();
+    </script>
+</body>
+</html>
     </script>
 </body>
 </html>
