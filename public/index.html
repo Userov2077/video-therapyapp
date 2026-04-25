@@ -41,8 +41,6 @@
             z-index: -2;
             background: radial-gradient(circle at 20% 30%, #0a1f0a, #020804);
         }
-        /* Если нужно видео-фон, раскомментировать и удалить ::before */
-        /* .video-background { position: fixed; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; } */
         .navbar {
             position: fixed; top: 0; left: 0; right: 0; height: var(--nav-h);
             background: rgba(4,10,5,0.78); backdrop-filter: blur(28px) saturate(1.6);
@@ -678,11 +676,6 @@
     </style>
 </head>
 <body>
-    <!-- Если нужен видео-фон, раскомментировать:
-    <video class="video-background" autoplay loop muted playsinline>
-        <source src="https://sylvan.apple.com/itunes-assets/Aerials116/v4/cb/5b/50/cb5b5035-6701-619f-9065-3d7d0e5fbef4/A007C0001_Final_v2_HEVC.mov" type="video/mp4">
-    </video>
-    -->
     <nav class="navbar">
         <div class="logo"><span class="logo-icon">🌿</span><span>Therapy Call</span></div>
         <div id="navAuth" class="auth-buttons">
@@ -832,6 +825,59 @@
                 </div>`;
             document.body.insertAdjacentHTML('beforeend', html);
             setTimeout(() => document.getElementById('imageModal').classList.add('active'), 10);
+        }
+
+        // ======================= ИНИЦИАЛИЗАЦИЯ СОКЕТА (ОДИН РАЗ) =======================
+        function initSocket() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+            socket = io();
+            socket.on('connect', () => {
+                if (currentUser) socket.emit('register_user', currentUser.id);
+            });
+            socket.on('new_message', async (msg) => {
+                await refreshUser();
+                if (currentChatPartner && (msg.from === currentChatPartner.id || msg.to === currentChatPartner.id)) {
+                    await fetch('/api/messages/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, fromUserId: msg.from }) });
+                    await loadChatMessages();
+                    scrollToBottom();
+                    if (currentUser.unreadCounts && currentUser.unreadCounts[msg.from]) {
+                        delete currentUser.unreadCounts[msg.from];
+                    }
+                } else {
+                    const userRes = await fetch(`/api/user/${msg.from}`);
+                    const userData = await userRes.json();
+                    const senderName = userData.success ? userData.user.fullName : 'Кто-то';
+                    showFloatingNotification('Новое сообщение', `${senderName}: ${msg.text?.substring(0,50) || '📷 Фото'}`);
+                    if (currentTab === 'chats') {
+                        renderChats();
+                    } else {
+                        if (currentUser && currentUser.unreadCounts) {
+                            currentUser.unreadCounts[msg.from] = (currentUser.unreadCounts[msg.from] || 0) + 1;
+                        }
+                    }
+                }
+            });
+            socket.on('notification', (notif) => {
+                showFloatingNotification(notif.title, notif.message);
+                if (currentUser) refreshUser();
+                if (currentTab === 'notifications') renderNotifications();
+            });
+            socket.on('unread_update', (data) => {
+                if (currentUser && data.from && data.count !== undefined) {
+                    if (!currentUser.unreadCounts) currentUser.unreadCounts = {};
+                    currentUser.unreadCounts[data.from] = data.count;
+                    if (currentTab === 'chats') renderChats();
+                }
+            });
+        }
+
+        async function refreshUser() {
+            const r = await fetch(`/api/user/${currentUser.id}`);
+            const d = await r.json();
+            if (d.success) currentUser = d.user;
         }
 
         // ======================= ЛЕНТА =======================
@@ -1930,6 +1976,7 @@
             if (currentUser.unreadCounts && currentUser.unreadCounts[userId]) {
                 delete currentUser.unreadCounts[userId];
             }
+            if (currentTab === 'chats') renderChats();
 
             document.getElementById('mainContent').innerHTML = `
                 <div class="chat-page">
@@ -1961,7 +2008,6 @@
             });
 
             await loadChatMessages();
-            setupChatSocket();
 
             document.getElementById('sendMsgBtn').onclick = sendChatMessage;
             document.getElementById('chatMessageInput').onkeypress = (e) => { if (e.key === 'Enter') sendChatMessage(); };
@@ -2075,47 +2121,6 @@
             await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ from: currentUser.id, to: currentChatPartner.id, text }) });
             await loadChatMessages();
             scrollToBottom();
-        }
-
-        function setupChatSocket() {
-            if (socket) {
-                socket.off('new_message');
-                socket.off('notification');
-                socket.off('unread_update');
-            }
-            socket = io();
-            socket.on('connect', () => { if (currentUser) socket.emit('register_user', currentUser.id); });
-            socket.on('new_message', async (msg) => {
-                await refreshUser();
-                if (currentChatPartner && (msg.from === currentChatPartner.id || msg.to === currentChatPartner.id)) {
-                    await fetch('/api/messages/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, fromUserId: msg.from }) });
-                    await loadChatMessages();
-                    scrollToBottom();
-                    if (currentUser.unreadCounts && currentUser.unreadCounts[msg.from]) {
-                        delete currentUser.unreadCounts[msg.from];
-                    }
-                } else {
-                    const userRes = await fetch(`/api/user/${msg.from}`);
-                    const userData = await userRes.json();
-                    const senderName = userData.success ? userData.user.fullName : 'Кто-то';
-                    showFloatingNotification('Новое сообщение', `${senderName}: ${msg.text?.substring(0,50) || '📷 Фото'}`);
-                    if (currentTab === 'chats') {
-                        renderChats();
-                    }
-                }
-            });
-            socket.on('notification', (notif) => {
-                showFloatingNotification(notif.title, notif.message);
-                if (currentUser) refreshUser();
-                if (currentTab === 'notifications') renderNotifications();
-            });
-            socket.on('unread_update', (data) => {
-                if (currentUser && data.from && data.count !== undefined) {
-                    if (!currentUser.unreadCounts) currentUser.unreadCounts = {};
-                    currentUser.unreadCounts[data.from] = data.count;
-                    if (currentTab === 'chats') renderChats();
-                }
-            });
         }
 
         function startChatWith(userId, name) {
@@ -2256,7 +2261,7 @@
             };
         }
 
-        // ======================= ПОСТЫ (новый пост с видео) =======================
+        // ======================= ПОСТЫ =======================
         function createPostModal() {
             const html = `
                 <div class="modal" id="cpModal">
@@ -2498,17 +2503,15 @@
         }
 
         function logout() {
-            openConfirmModal('Выйти из аккаунта?', '', () => { localStorage.clear(); location.reload(); });
+            openConfirmModal('Выйти из аккаунта?', '', () => {
+                if (socket) socket.disconnect();
+                localStorage.clear();
+                location.reload();
+            });
         }
 
         function startCall(roomId, role) {
             window.location.href = `/call.html?room=${roomId}&role=${role}`;
-        }
-
-        async function refreshUser() {
-            const r = await fetch(`/api/user/${currentUser.id}`);
-            const d = await r.json();
-            if (d.success) currentUser = d.user;
         }
 
         function closeModal(id) {
@@ -2580,7 +2583,7 @@
                         document.getElementById('bottomNav').style.display = 'flex';
                         await fetchJSON('/api/psychologists').then(d => { allPsychologists = d.psychologists || []; });
                         document.getElementById('searchNavBtn').onclick = openSearchModal;
-                        setupChatSocket();
+                        initSocket();
                     }
                 } catch(e) { localStorage.clear(); }
             }

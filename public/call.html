@@ -32,6 +32,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            border: 1px solid rgba(139,202,139,0.3); /* аккуратная рамка */
         }
         #remoteVideo {
             width: 100%;
@@ -46,7 +47,7 @@
             height: 160px;
             border-radius: 16px;
             overflow: hidden;
-            border: 2px solid rgba(139,202,139,0.6);
+            border: 2px solid rgba(139,202,139,0.8); /* яркая рамка для маленького видео */
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
             z-index: 10;
             cursor: pointer;
@@ -62,6 +63,7 @@
             height: 100%;
             object-fit: cover;
         }
+        /* Основные кнопки управления */
         .controls {
             position: absolute;
             bottom: 30px;
@@ -94,11 +96,11 @@
         }
         .end-call { background: rgba(220,38,38,0.8); }
         .end-call:hover { background: #dc2626; }
-        .reconnect-btn { background: #f59e0b; }
-        .reconnect-btn:hover { background: #f59e0b; opacity:0.9; }
         .recording-active { background: #dc2626 !important; animation: pulse 1s infinite; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
         .chat-toggle-btn { background: rgba(139,202,139,0.3); }
+
+        /* Панель чата */
         .chat-panel {
             position: absolute;
             bottom: 100px;
@@ -184,31 +186,48 @@
             cursor: pointer;
             color: #0d2010;
         }
-        .connection-status {
+
+        /* Верхняя панель: статус и кнопка переподключения */
+        .top-bar {
             position: absolute;
             top: 20px;
             left: 20px;
-            background: rgba(0,0,0,0.6);
-            backdrop-filter: blur(10px);
-            padding: 6px 12px;
-            border-radius: 30px;
-            font-size: 12px;
-            z-index: 15;
-            font-family: monospace;
-            color: #8bca8b;
-        }
-        .room-info {
-            position: absolute;
-            top: 20px;
             right: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 15;
+            pointer-events: none;
+        }
+        .connection-status {
             background: rgba(0,0,0,0.6);
             backdrop-filter: blur(10px);
             padding: 6px 12px;
             border-radius: 30px;
             font-size: 12px;
-            z-index: 15;
             font-family: monospace;
             color: #8bca8b;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .reconnect-btn-top {
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(139,202,139,0.5);
+            border-radius: 30px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            pointer-events: auto;
+            transition: all 0.2s;
+        }
+        .reconnect-btn-top:hover {
+            background: rgba(139,202,139,0.3);
+            transform: scale(1.02);
         }
         .waiting-message {
             position: absolute;
@@ -238,6 +257,9 @@
             .control-btn { width: 48px; height: 48px; font-size: 20px; }
             .chat-panel { width: calc(100vw - 24px); right: 12px; bottom: 100px; }
             .chat-messages { height: 260px; }
+            .top-bar { top: 12px; left: 12px; right: 12px; }
+            .connection-status { font-size: 10px; padding: 4px 10px; }
+            .reconnect-btn-top { font-size: 10px; padding: 4px 10px; }
         }
     </style>
 </head>
@@ -254,17 +276,20 @@
         <video id="localVideo" autoplay muted playsinline></video>
     </div>
 
+    <!-- Верхняя панель с статусом и кнопкой переподключения -->
+    <div class="top-bar">
+        <div id="connectionStatus" class="connection-status">📡 Подключение...</div>
+        <button id="reconnectBtnTop" class="reconnect-btn-top"><i class="fas fa-sync-alt"></i> Переподключиться</button>
+    </div>
+
+    <!-- Основные кнопки (без кнопки переподключения) -->
     <div class="controls">
         <button id="toggleMic" class="control-btn" title="Микрофон"><i class="fas fa-microphone"></i></button>
         <button id="toggleCam" class="control-btn" title="Камера"><i class="fas fa-video"></i></button>
         <button id="recordBtn" class="control-btn" title="Запись"><i class="fas fa-circle"></i></button>
-        <button id="reconnectBtn" class="control-btn reconnect-btn" title="Переподключиться"><i class="fas fa-sync-alt"></i></button>
         <button id="chatToggleBtn" class="control-btn chat-toggle-btn" title="Чат"><i class="fas fa-comment"></i></button>
         <button id="endCallBtn" class="control-btn end-call" title="Завершить"><i class="fas fa-phone-slash"></i></button>
     </div>
-
-    <div id="connectionStatus" class="connection-status">📡 Подключение...</div>
-    <div id="roomInfo" class="room-info">🔑 Комната: <span id="roomIdSpan"></span></div>
 
     <div id="chatPanel" class="chat-panel">
         <div class="chat-header">
@@ -294,8 +319,6 @@
             window.location.href = '/';
         }
 
-        document.getElementById('roomIdSpan').textContent = roomId;
-
         const localVideo = document.getElementById('localVideo');
         const remoteVideo = document.getElementById('remoteVideo');
         const waitingMsg = document.getElementById('waitingMessage');
@@ -303,7 +326,7 @@
         const toggleMicBtn = document.getElementById('toggleMic');
         const toggleCamBtn = document.getElementById('toggleCam');
         const recordBtn = document.getElementById('recordBtn');
-        const reconnectBtn = document.getElementById('reconnectBtn');
+        const reconnectBtnTop = document.getElementById('reconnectBtnTop');
         const chatToggleBtn = document.getElementById('chatToggleBtn');
         const closeChatBtn = document.getElementById('closeChatBtn');
         const endCallBtn = document.getElementById('endCallBtn');
@@ -321,10 +344,19 @@
         let mediaRecorder = null;
         let recordedChunks = [];
         let isLocalLarge = false;
+        let connectionEstablished = false;
 
         function updateStatus(msg, isError = false) {
             statusDiv.innerHTML = `📡 ${msg}`;
             statusDiv.style.color = isError ? '#ff6b6b' : '#8bca8b';
+            // Если соединение установлено, прячем статус (делаем прозрачным)
+            if (connectionEstablished && !isError) {
+                statusDiv.style.opacity = '0.3';
+                statusDiv.style.background = 'rgba(0,0,0,0.2)';
+            } else {
+                statusDiv.style.opacity = '1';
+                statusDiv.style.background = 'rgba(0,0,0,0.6)';
+            }
             console.log(msg);
         }
 
@@ -345,7 +377,9 @@
             msgDiv.innerHTML = `<div>${escapeHtml(text)}</div><div class="chat-message-time">${timeStr}</div>`;
             chatMessages.appendChild(msgDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
-            if (chatMessages.querySelector('.empty-placeholder')) chatMessages.innerHTML = '';
+            if (chatMessages.children.length === 1 && chatMessages.children[0].innerText.includes('Сообщения будут здесь')) {
+                chatMessages.innerHTML = '';
+            }
         }
 
         async function getIceServers() {
@@ -375,6 +409,8 @@
                 updateStatus('Видео собеседника получено');
                 remoteVideo.srcObject = event.streams[0];
                 waitingMsg.style.display = 'none';
+                connectionEstablished = true;
+                updateStatus('Соединение установлено');
             };
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate && partnerSocketId) {
@@ -383,8 +419,18 @@
             };
             peerConnection.oniceconnectionstatechange = () => {
                 const state = peerConnection.iceConnectionState;
-                if (state === 'connected') updateStatus('Соединение установлено');
-                else if (state === 'failed') updateStatus('Соединение разорвано', true);
+                if (state === 'connected') {
+                    connectionEstablished = true;
+                    updateStatus('Соединение установлено');
+                    waitingMsg.style.display = 'none';
+                } else if (state === 'failed') {
+                    connectionEstablished = false;
+                    updateStatus('Соединение разорвано', true);
+                    waitingMsg.style.display = 'flex';
+                } else if (state === 'disconnected') {
+                    connectionEstablished = false;
+                    updateStatus('Потеря связи', true);
+                }
             };
             return peerConnection;
         }
@@ -423,6 +469,7 @@
             socket.on('room-joined', () => {
                 updateStatus('Ожидание собеседника...');
                 waitingMsg.style.display = 'flex';
+                connectionEstablished = false;
             });
             socket.on('call-ready', async (data) => {
                 updateStatus('Собеседник найден, устанавливаем соединение...');
@@ -470,7 +517,8 @@
             socket.on('partner-disconnected', () => {
                 updateStatus('Собеседник отключился', true);
                 showToast('Собеседник покинул звонок', true);
-                setTimeout(() => window.location.href = '/', 2000);
+                connectionEstablished = false;
+                waitingMsg.style.display = 'flex';
             });
         }
 
@@ -500,7 +548,7 @@
                 remoteWrapper.style.height = '160px';
                 remoteWrapper.style.borderRadius = '16px';
                 remoteWrapper.style.overflow = 'hidden';
-                remoteWrapper.style.border = '2px solid rgba(139,202,139,0.6)';
+                remoteWrapper.style.border = '2px solid rgba(139,202,139,0.8)';
                 remoteWrapper.style.cursor = 'pointer';
                 isLocalLarge = true;
             } else {
@@ -515,7 +563,7 @@
                 remoteWrapper.style.inset = '0';
                 remoteWrapper.style.width = '100%';
                 remoteWrapper.style.height = '100%';
-                remoteWrapper.style.border = 'none';
+                remoteWrapper.style.border = '1px solid rgba(139,202,139,0.3)';
                 remoteWrapper.style.bottom = 'auto';
                 remoteWrapper.style.right = 'auto';
                 remoteWrapper.style.borderRadius = '0';
@@ -578,6 +626,8 @@
                 socket.emit('register_user', currentUserId);
                 socket.emit('join-call-room', roomId, currentUserId, userRole);
                 updateStatus('Переподключение...');
+                connectionEstablished = false;
+                waitingMsg.style.display = 'flex';
             } else {
                 setupSocket();
             }
@@ -605,19 +655,13 @@
                 if (isRecording) stopRecording();
                 else startRecording();
             };
-            reconnectBtn.onclick = reconnect;
+            reconnectBtnTop.onclick = reconnect;
             endCallBtn.onclick = endCall;
             sendChatBtn.onclick = sendChatMessage;
             chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChatMessage(); };
             chatToggleBtn.onclick = () => { chatPanel.classList.toggle('open'); };
             closeChatBtn.onclick = () => { chatPanel.classList.remove('open'); };
             localVideoWrapper.onclick = swapVideoSize;
-
-            setTimeout(() => {
-                if (chatMessages.children.length === 1 && chatMessages.children[0].innerText.includes('Сообщения будут здесь')) {
-                    chatMessages.innerHTML = '';
-                }
-            }, 100);
         }
 
         init();
