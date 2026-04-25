@@ -876,15 +876,22 @@
         const userRes = await fetch(`/api/user/${msg.from}`);
         const userData = await userRes.json();
         const senderName = userData.success ? userData.user.fullName : 'Кто-то';
-        showFloatingNotification('Новое сообщение', `${senderName}: ${msg.text?.substring(0,50) || '📷 Фото'}`);
-        // Обновляем список чатов только если мы НЕ в чате (т.е. текущий чат не открыт)
+        let preview = '';
+        if (msg.text) preview = msg.text.substring(0,50);
+        else if (msg.image) preview = '📷 Фото';
+        else if (msg.voice) preview = '🎤 Голосовое';
+        else preview = 'Вложение';
+        showFloatingNotification('Новое сообщение', `${senderName}: ${preview}`);
+        // Обновляем счётчик непрочитанных
+        if (currentUser && currentUser.unreadCounts) {
+            currentUser.unreadCounts[msg.from] = (currentUser.unreadCounts[msg.from] || 0) + 1;
+        }
+        // Если открыта вкладка чатов и нет активного чата, обновляем список
         if (currentTab === 'chats' && !currentChatPartner) {
             renderChats();
-        } else {
-            // просто обновляем счётчик непрочитанных
-            if (currentUser && currentUser.unreadCounts) {
-                currentUser.unreadCounts[msg.from] = (currentUser.unreadCounts[msg.from] || 0) + 1;
-            }
+        } else if (currentTab === 'chats' && currentChatPartner && currentChatPartner.id !== msg.from) {
+            // Если открыт чат с другим человеком, тоже обновляем список (чтобы появилась точка у нужного контакта)
+            renderChats();
         }
     }
 });
