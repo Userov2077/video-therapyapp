@@ -12,7 +12,11 @@ const server = http.createServer(app);
 const io = socketIo(server, {
     cors: { origin: "*", methods: ["GET", "POST"], credentials: true },
     transports: ['websocket', 'polling'],
-    allowEIO3: true
+    allowEIO3: true,
+    path: '/socket.io'   // ← добавьте эту строку
+});
+io.engine.on('connection_error', (err) => {
+    console.error('Socket.IO engine error:', err);
 });
 
 app.use(express.json());
@@ -914,11 +918,97 @@ app.get('/api/psychologists', async (req, res) => {
 // ----------------------------------------------------------------------
 const activeRooms = new Map();
 io.on('connection', (socket) => {
-    console.log('✅ client connected');
-    socket.on('register_user', (userId) => {
-        if (userId) socket.join(userId);
+    console.log('🔌 WebSocket connected');
+    socket.on('register_user', (userId) => { socket.userId = userId; if (userId) socket.join(userId); });
+    socket.on('join-call-room', (roomId, userId, userType) => {
+        try {
+            if (!activeRooms.has(roomId)) activeRooms.set(roomId, { psychologist: null, client: null, users: new Map() });
+            const room = activeRooms.get(roomId);
+            if (userType === 'psychologist' && room.psychologist && room.psychologist !== socket.id) {
+                io.to(room.psychologist).emit('partner-disconnected');
+                const oldSocket = io.sockets.sockets.get(room.psychologist);
+                if (oldSocket) oldSocket.leave(roomId);
+                room.psychologist = socket.id;
+                room.users.delete(room.psychologist);
+            } else if (userType === 'client' && room.client && room.client !== socket.id) {
+                io.to(room.client).emit('partner-disconnected');
+                const oldSocket = io.sockets.sockets.get(room.client);
+                if (oldSocket) oldSocket.leave(roomId);
+                room.client = socket.id;
+                room.users.delete(room.client);
+            }
+            room.users.set(socket.id, { userId, userType });
+            if (userType === 'psychologist') room.psychologist = socket.id;
+            else room.client = socket.id;
+            socket.join(roomId);
+            socket.roomId = roomId;
+            socket.userId = userId;
+            socket.userType = userType;
+            if (room.psychologist && room.client) {
+                io.to(room.psychologist).emit('call-ready', { partnerId: room.client });
+                io.to(room.client).emit('call-ready', { partnerId: room.psychologist });
+            }
+            socket.emit('room-joined');
+        } catch (err) { console.error(err); }
     });
-    socket.on('disconnect', () => console.log('❌ client disconnected'));
+    socket.on('call-message', (msgData) => {
+        const room = activeRooms.get(socket.roomId);
+        if (room) {
+            const targetId = socket.userType === 'psychologist' ? room.client : room.psychologist;
+            if (targetId) io.to(targetId).emit('call-message', { from: socket.userId, text: msgData.text, time: new Date().toISOString() });
+        }
+    });
+    socket.on('offer', (data) => socket.to(data.target).emit('offer', { sdp: data.sdp, from: socket.id }));
+    socket.on('answer', (data) => socket.to(data.target).emit('answer', { sdp: data.sdp, from: socket.id }));
+    socket.on('ice-candidate', (data) => socket.to(data.target).emit('ice-candidate', { candidate: data.candidate, from: socket.id }));
+    socket.on('end-call', async () => {
+        if (socket.roomId) {
+            socket.to(socket.roomId).emit('call-ended');
+            const room = activeRooms.get(socket.roomId);
+            if (room && room.users.size >= 2) {
+                const result = await pool.query('SELECT * FROM appointments WHERE room_id = $1', [socket.roomId]);
+                const appointment = result.rows[0];
+                if (appointment && appointment.status === 'confirmed') {
+                    await pool.query('UPDATE appointments SET status = $1 WHERE id = $2', ['completed', appointment.id]);
+                    const psychologist = await getUser(appointment.psychologist_id);
+                    const client = await getUser(appointment.client_id);
+                    if (psychologist && psychologist.clients) {
+                        const c = psychologist.clients.find(c => c.appointmentId === appointment.id);
+                        if (c) c.status = 'completed';
+                        await updateUser(psychologist);
+                    }
+                    if (client && client.appointments) {
+                        const a = client.appointments.find(a => a.id === appointment.id);
+                        if (a) a.status = 'completed';
+                        await updateUser(client);
+                    }
+                    io.to(appointment.psychologist_id).emit('appointment_completed', appointment.id);
+                    io.to(appointment.client_id).emit('appointment_completed', appointment.id);
+                }
+            }
+            setTimeout(() => {
+                const room = activeRooms.get(socket.roomId);
+                if (room && (!room.psychologist || !room.client)) activeRooms.delete(socket.roomId);
+            }, 5000);
+            socket.leave(socket.roomId);
+            delete socket.roomId;
+        }
+    });
+    socket.on('disconnect', () => {
+        if (socket.roomId) {
+            socket.to(socket.roomId).emit('partner-disconnected');
+            const room = activeRooms.get(socket.roomId);
+            if (room) {
+                room.users.delete(socket.id);
+                if (socket.userType === 'psychologist') room.psychologist = null;
+                else room.client = null;
+                if (room.users.size === 0) {
+                    setTimeout(() => { if (activeRooms.get(socket.roomId)?.users.size === 0) activeRooms.delete(socket.roomId); }, 10000);
+                }
+            }
+            socket.leave(socket.roomId);
+        }
+    });
 });
 
 app.get('/health', (req, res) => res.status(200).send('OK'));
