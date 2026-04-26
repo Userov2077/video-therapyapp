@@ -351,12 +351,16 @@ app.put('/api/user/profile', upload.single('avatar'), async (req, res) => {
 app.put('/api/schedule', async (req, res) => {
     try {
         const { userId, schedule } = req.body;
+        console.log('Updating schedule for user', userId, schedule);
         const user = await getUser(userId);
         if (!user || user.role !== 'psychologist') return res.json({ success: false });
         user.schedule = schedule;
         await updateUser(user);
         res.json({ success: true });
-    } catch(err) { res.json({ success: false }); }
+    } catch(err) {
+        console.error('Schedule error:', err);
+        res.json({ success: false });
+    }
 });
 
 // --- Загрузка файлов (аватар, изображения, голосовые и т.д.) ---

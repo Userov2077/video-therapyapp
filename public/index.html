@@ -2002,7 +2002,7 @@
             let html = `<div class="container"><div class="page-title">Сообщения</div><div class="chat-list">`;
             for (const c of validContacts) {
                 html += `
-                    <div class="chat-contact glass-card" onclick="openChat('${c.id}','${escapeHtml(c.fullName)}')">
+                    <div class="chat-contact glass-card" data-contact-id="${c.id}" onclick="openChat('${c.id}','${escapeHtml(c.fullName)}')">
                         <img class="chat-contact-avatar" src="${escapeHtml(c.avatar)}" onerror="this.src='https://ui-avatars.com/api/?name=${encodeURIComponent(c.fullName)}&background=8bca8b&color=fff'">
                         <div class="chat-contact-info">
                             <div class="chat-contact-name">${escapeHtml(c.fullName)}</div>
@@ -2018,113 +2018,154 @@
         }
 
         async function openChat(userId, userName) {
-            currentChatPartner = { id: userId, name: userName };
-            await fetch('/api/messages/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, fromUserId: userId }) });
-            await window.refreshUser();
-            if (currentUser.unreadCounts && currentUser.unreadCounts[userId]) {
-                delete currentUser.unreadCounts[userId];
-            }
-            if (currentTab === 'chats') renderChats();
-
-            document.getElementById('mainContent').innerHTML = `
-                <div class="chat-page">
-                    <div class="chat-messages-container">
-                        <div class="chat-messages-header">
-                            <button class="back-btn" onclick="renderChats()"><i class="fas fa-arrow-left"></i></button>
-                            <img src="" id="chatPartnerAvatar" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--green-border);" onerror="this.style.display='none'">
-                            <div style="flex:1">
-                                <div style="font-weight:600;font-size:15px;">${escapeHtml(userName)}</div>
-                            </div>
-                        </div>
-                        <div class="chat-messages-list" id="chatMessagesList"></div>
-                        <div class="chat-input-area">
-                            <div class="chat-controls">
-                                <button id="attachImageBtn" title="Фото"><i class="fas fa-image"></i></button>
-                                <button id="voiceRecordBtn" title="Голосовое"><i class="fas fa-microphone"></i></button>
-                            </div>
-                            <input type="file" id="imageInput" accept="image/*" style="display:none">
-                            <input type="text" id="chatMessageInput" placeholder="Сообщение...">
-                            <button class="send-btn-chat" id="sendMsgBtn"><i class="fas fa-paper-plane"></i></button>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            await new Promise(resolve => setTimeout(resolve, 10));
-
-            fetch(`/api/user/${userId}`).then(r => r.json()).then(d => {
-                const av = document.getElementById('chatPartnerAvatar');
-                if (av && d.success) av.src = d.user.avatar;
-            }).catch(console.error);
-
-            await loadChatMessages();
-            scrollToBottom();
-
-            const sendBtn = document.getElementById('sendMsgBtn');
-            const chatInput = document.getElementById('chatMessageInput');
-            const attachBtn = document.getElementById('attachImageBtn');
-            const imageInput = document.getElementById('imageInput');
-            const voiceBtn = document.getElementById('voiceRecordBtn');
-
-            if (sendBtn) sendBtn.onclick = sendChatMessage;
-            if (chatInput) chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChatMessage(); };
-
-            if (attachBtn && imageInput) {
-                attachBtn.onclick = () => imageInput.click();
-                imageInput.onchange = async () => {
-                    const file = imageInput.files[0];
-                    if (!file || !file.type.startsWith('image/')) { showToast('Только изображения', true); return; }
-                    const compressedBlob = await compressImage(file, 1024, 0.8);
-                    const formData = new FormData();
-                    formData.append('image', compressedBlob, file.name);
-                    const res = await fetch('/api/upload-chat-image', { method:'POST', body: formData });
-                    const data = await res.json();
-                    if (data.success) {
-                        await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ from: currentUser.id, to: currentChatPartner.id, text: '', image: data.imageUrl }) });
-                        await loadChatMessages();
-                        scrollToBottom();
-                    }
-                    imageInput.value = '';
-                };
-            }
-
-            if (voiceBtn) {
-                let mediaRecorder = null, audioChunks = [], isRecording = false;
-                voiceBtn.onclick = async () => {
-                    if (!isRecording) {
-                        try {
-                            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-                            audioChunks = [];
-                            mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
-                            mediaRecorder.onstop = async () => {
-                                const blob = new Blob(audioChunks, { type: 'audio/webm' });
-                                const fd = new FormData(); fd.append('voice', blob, 'voice.webm');
-                                const res = await fetch('/api/upload-voice', { method:'POST', body: fd });
-                                const data = await res.json();
-                                if (data.success) {
-                                    await fetch('/api/messages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ from: currentUser.id, to: currentChatPartner.id, text: '', voice: data.voiceUrl }) });
-                                    await loadChatMessages();
-                                    scrollToBottom();
-                                    showToast('Голосовое отправлено');
-                                }
-                                stream.getTracks().forEach(t => t.stop());
-                                voiceBtn.innerHTML = '<i class="fas fa-microphone"></i>';
-                                voiceBtn.classList.remove('recording-active');
-                                isRecording = false;
-                            };
-                            mediaRecorder.start();
-                            isRecording = true;
-                            voiceBtn.classList.add('recording-active');
-                            voiceBtn.innerHTML = '<i class="fas fa-stop"></i>';
-                            setTimeout(() => { if (mediaRecorder?.state === 'recording') mediaRecorder.stop(); }, 30000);
-                        } catch(e) { showToast('Нет доступа к микрофону', true); }
-                    } else {
-                        if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
-                    }
-                };
+    currentChatPartner = { id: userId, name: userName };
+    
+    // Помечаем сообщения как прочитанные
+    await fetch('/api/messages/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id, fromUserId: userId })
+    });
+    await window.refreshUser();
+    
+    if (currentUser.unreadCounts && currentUser.unreadCounts[userId]) {
+        delete currentUser.unreadCounts[userId];
+    }
+    
+    // НЕ вызываем renderChats() — она уничтожит DOM чата!
+    // Вместо этого обновляем только счётчик непрочитанных в фоне
+    if (currentTab === 'chats') {
+        // Обновляем список чатов в фоне, но не переключаем вкладку
+        const chatsContainer = document.querySelector('.chat-list');
+        if (chatsContainer) {
+            // Просто обновляем бейджи непрочитанных, не перерисовывая всё
+            const chatItems = document.querySelectorAll('.chat-contact');
+            for (const item of chatItems) {
+                const contactId = item.getAttribute('data-contact-id');
+                if (contactId === userId) {
+                    const badge = item.querySelector('.unread-badge');
+                    if (badge) badge.remove();
+                    break;
+                }
             }
         }
+    }
+    
+    // Рисуем интерфейс чата
+    document.getElementById('mainContent').innerHTML = `
+        <div class="chat-page">
+            <div class="chat-messages-container">
+                <div class="chat-messages-header">
+                    <button class="back-btn" onclick="renderChats()"><i class="fas fa-arrow-left"></i></button>
+                    <img src="" id="chatPartnerAvatar" style="width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--green-border);" onerror="this.style.display='none'">
+                    <div style="flex:1">
+                        <div style="font-weight:600;font-size:15px;">${escapeHtml(userName)}</div>
+                    </div>
+                </div>
+                <div class="chat-messages-list" id="chatMessagesList"></div>
+                <div class="chat-input-area">
+                    <div class="chat-controls">
+                        <button id="attachImageBtn" title="Фото"><i class="fas fa-image"></i></button>
+                        <button id="voiceRecordBtn" title="Голосовое"><i class="fas fa-microphone"></i></button>
+                    </div>
+                    <input type="file" id="imageInput" accept="image/*" style="display:none">
+                    <input type="text" id="chatMessageInput" placeholder="Сообщение...">
+                    <button class="send-btn-chat" id="sendMsgBtn"><i class="fas fa-paper-plane"></i></button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    await new Promise(resolve => setTimeout(resolve, 10));
+    
+    // Загружаем аватар
+    fetch(`/api/user/${userId}`).then(r => r.json()).then(d => {
+        const av = document.getElementById('chatPartnerAvatar');
+        if (av && d.success) av.src = d.user.avatar;
+    }).catch(console.error);
+    
+    await loadChatMessages();
+    scrollToBottom();
+    
+    // Привязываем обработчики
+    const sendBtn = document.getElementById('sendMsgBtn');
+    const chatInput = document.getElementById('chatMessageInput');
+    const attachBtn = document.getElementById('attachImageBtn');
+    const imageInput = document.getElementById('imageInput');
+    const voiceBtn = document.getElementById('voiceRecordBtn');
+    
+    if (sendBtn) sendBtn.onclick = sendChatMessage;
+    if (chatInput) chatInput.onkeypress = (e) => { if (e.key === 'Enter') sendChatMessage(); };
+    
+    if (attachBtn && imageInput) {
+        attachBtn.onclick = () => imageInput.click();
+        imageInput.onchange = async () => {
+            const file = imageInput.files[0];
+            if (!file || !file.type.startsWith('image/')) { showToast('Только изображения', true); return; }
+            const compressedBlob = await compressImage(file, 1024, 0.8);
+            const formData = new FormData();
+            formData.append('image', compressedBlob, file.name);
+            const res = await fetch('/api/upload-chat-image', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.success) {
+                await fetch('/api/messages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ from: currentUser.id, to: currentChatPartner.id, text: '', image: data.imageUrl })
+                });
+                await loadChatMessages();
+                scrollToBottom();
+            }
+            imageInput.value = '';
+        };
+    }
+    
+    if (voiceBtn) {
+        let mediaRecorder = null, audioChunks = [], isRecording = false;
+        voiceBtn.onclick = async () => {
+            if (!isRecording) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                    audioChunks = [];
+                    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+                    mediaRecorder.onstop = async () => {
+                        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+                        const fd = new FormData();
+                        fd.append('voice', blob, 'voice.webm');
+                        const res = await fetch('/api/upload-voice', { method: 'POST', body: fd });
+                        const data = await res.json();
+                        if (data.success) {
+                            await fetch('/api/messages', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ from: currentUser.id, to: currentChatPartner.id, text: '', voice: data.voiceUrl })
+                            });
+                            await loadChatMessages();
+                            scrollToBottom();
+                            showToast('Голосовое отправлено');
+                        }
+                        stream.getTracks().forEach(t => t.stop());
+                        voiceBtn.innerHTML = '<i class="fas fa-microphone"></i>';
+                        voiceBtn.classList.remove('recording-active');
+                        isRecording = false;
+                    };
+                    mediaRecorder.start();
+                    isRecording = true;
+                    voiceBtn.classList.add('recording-active');
+                    voiceBtn.innerHTML = '<i class="fas fa-stop"></i>';
+                    setTimeout(() => {
+                        if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
+                    }, 30000);
+                } catch(e) {
+                    showToast('Нет доступа к микрофону', true);
+                }
+            } else {
+                if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
+            }
+        };
+    }
+}
 
         async function loadChatMessages() {
             if (!currentChatPartner) return;
@@ -2218,6 +2259,15 @@
 
         // ======================= ЗАПИСЬ К ПСИХОЛОГУ =======================
         async function bookPsychologist(id, name) {
+            // Принудительно загружаем данные психолога
+            const userRes = await fetch(`/api/user/${id}`);
+            const userData = await userRes.json();
+            if (!userData.success) {
+                showToast('Не удалось загрузить данные психолога', true);
+                return;
+            }
+            const psychologist = userData.user;
+            const sched = psychologist.schedule || {};
             if (!allPsychologists.length) await fetchJSON('/api/psychologists').then(d => { allPsychologists = d.psychologists || []; });
             const p = allPsychologists.find(p => p.id === id);
             const sched = p?.schedule || {};
