@@ -2270,7 +2270,6 @@
             const sched = psychologist.schedule || {};
             if (!allPsychologists.length) await fetchJSON('/api/psychologists').then(d => { allPsychologists = d.psychologists || []; });
             const p = allPsychologists.find(p => p.id === id);
-            const sched = p?.schedule || {};
             const dates = Object.keys(sched).sort();
 
             let slotsHtml = '';
